@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>body{margin:0;padding:24px;background:var(--gh-canvas);}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.tile{border:1px solid var(--gh-line);border-radius:8px;background:var(--gh-surface);padding:14px;display:flex;flex-direction:column;gap:10px;min-height:140px;}
+.dot{width:14px;height:14px;border-radius:999px;}
+.row{display:flex;align-items:center;gap:8px;}
+.title{font-family:var(--gh-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--gh-ink);}
+.hex{font-family:var(--gh-mono);font-size:10px;color:var(--gh-muted);}
+.use{font-size:12px;color:var(--gh-muted);line-height:1.45;margin-top:auto;}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-family:var(--gh-mono);font-size:10px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;border:1px solid;width:fit-content;}
+</style></head>
+<body>
+<div class="grid">
+  <div class="tile"><div class="row"><div class="dot" style="background:#3D5A3F"></div><div class="title">POSITIVE</div></div><div class="hex">#3D5A3F · MOSS</div><span class="chip" style="background:#E6EBE3;color:#3D5A3F;border-color:#C2D0C1">Pursue · 8.4</span><div class="use">Pursue. High score. Energizing. Integrity confirmed.</div></div>
+  <div class="tile"><div class="row"><div class="dot" style="background:#9C7A3C"></div><div class="title">CAUTION</div></div><div class="hex">#9C7A3C · OCHRE</div><span class="chip" style="background:#F4ECDB;color:#9C7A3C;border-color:#E0D2B0">Explore · 6.1</span><div class="use">Explore. Mid score. Mixed signal. Worth one more conversation.</div></div>
+  <div class="tile"><div class="row"><div class="dot" style="background:#A14A3A"></div><div class="title">WARN</div></div><div class="hex">#A14A3A · CLAY</div><span class="chip" style="background:#F2E0DA;color:#A14A3A;border-color:#DCB9AE">Avoid · 3.2</span><div class="use">Avoid. Drains energy. Compounding risk. Walk away.</div></div>
+  <div class="tile"><div class="row"><div class="dot" style="background:#5A6F8A"></div><div class="title">NEUTRAL</div></div><div class="hex">#5A6F8A · SLATE</div><span class="chip" style="background:#E4E8ED;color:#5A6F8A;border-color:#BFCAD5">Parked</span><div class="use">Parked. On hold. Observed. No action this cycle.</div></div>
+</div>
+</body></html>

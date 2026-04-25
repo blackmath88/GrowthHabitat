@@ -1,0 +1,49 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../colors_and_type.css">
+<style>
+  body{margin:0;padding:32px;background:var(--gh-canvas);font-family:var(--gh-sans);}
+  .row{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;}
+  .col{display:flex;flex-direction:column;gap:8px;align-items:flex-start;}
+  .sw{width:108px;height:108px;border-radius:8px;border:1px solid rgba(35,36,41,.08);}
+  .lbl{font-family:var(--gh-mono);font-size:10.5px;color:#232429;letter-spacing:.06em;font-weight:500;}
+  .sub{font-family:var(--gh-mono);font-size:10px;color:#6B6862;letter-spacing:.04em;}
+  .tag{font-family:var(--gh-mono);font-size:9.5px;color:#9A958D;text-transform:uppercase;letter-spacing:.08em;}
+  .note{margin-left:24px;padding-left:24px;border-left:1px solid #E1DCD2;max-width:240px;}
+  .note .eb{font-family:var(--gh-mono);font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:#9A958D;margin-bottom:8px;}
+  .note p{font-size:13px;color:#3A3B40;line-height:1.55;margin:0;}
+  .note p+p{margin-top:8px;}
+  .pair{margin-top:28px;display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid #E1DCD2;max-width:560px;}
+  .pair .half{flex:1;padding:22px 24px;display:flex;flex-direction:column;gap:6px;}
+  .pair .half.a{background:#232429;color:#F4EFE6;}
+  .pair .half.b{background:#5D271C;color:#F1E3DC;}
+  .pair .eb{font-family:var(--gh-mono);font-size:9.5px;letter-spacing:.10em;text-transform:uppercase;opacity:.7;}
+  .pair .name{font-family:var(--gh-serif);font-variation-settings:"opsz" 144,"SOFT" 50,"wght" 420;font-size:22px;letter-spacing:-.02em;line-height:1.1;}
+  .pair .hex{font-family:var(--gh-mono);font-size:11px;letter-spacing:.04em;opacity:.75;margin-top:4px;}
+</style></head>
+<body>
+
+<div class="row">
+  <div class="col"><div class="sw" style="background:#5D271C;border-color:#5D271C"></div><div class="lbl">ESPRESSO</div><div class="sub">#5D271C</div><div class="tag">accent · primary</div></div>
+  <div class="col"><div class="sw" style="background:#44190F;border-color:#44190F"></div><div class="lbl">ESPRESSO DEEP</div><div class="sub">#44190F</div><div class="tag">hover · pressed</div></div>
+  <div class="col"><div class="sw" style="background:#F1E3DC"></div><div class="lbl">ESPRESSO SOFT</div><div class="sub">#F1E3DC</div><div class="tag">tint · pill bg</div></div>
+  <div class="col"><div class="sw" style="background:#D9BFB3"></div><div class="lbl">ESPRESSO LINE</div><div class="sub">#D9BFB3</div><div class="tag">tint · border</div></div>
+  <div class="note">
+    <div class="eb">One accent</div>
+    <p>Espresso carries every CTA, active state, focus ring, and score fill. Mellow, warm, almost edible — not corporate, not fashion-y.</p>
+    <p>Pairs only with charcoal ink. Never on its own; never gradient.</p>
+  </div>
+</div>
+
+<div class="pair">
+  <div class="half a">
+    <span class="eb">Charcoal</span>
+    <span class="name">Ink &amp; structure</span>
+    <span class="hex">#232429</span>
+  </div>
+  <div class="half b">
+    <span class="eb">Espresso</span>
+    <span class="name">Warmth &amp; pull</span>
+    <span class="hex">#5D271C</span>
+  </div>
+</div>
+
+</body></html>
