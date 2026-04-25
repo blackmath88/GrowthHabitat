@@ -1,2 +1,0 @@
-# GrowthHabitat
-lets grow together
