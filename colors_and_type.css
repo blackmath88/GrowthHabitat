@@ -6,7 +6,7 @@
    and downstream artifact built against this system.
    ========================================================================== */
 
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..600,0..100&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
 :root {
   /* ---------- BRAND ----------------------------------------------------- */
@@ -17,12 +17,12 @@
   --gh-ink-soft:      #3A3B40;   /* body text on canvas                    */
   --gh-muted:         #6B6862;   /* secondary text, captions               */
   --gh-faint:         #9A958D;   /* tertiary text, eyebrow on canvas       */
-  --gh-line:          #E1DCD2;   /* hairline borders, default              */
-  --gh-line-soft:     #ECE6DA;   /* divider rules inside cards             */
-  --gh-canvas:        #F4EFE6;   /* page background — paper cream          */
-  --gh-canvas-deep:   #EFE9DD;   /* sidebar, inset surfaces                */
-  --gh-surface:       #FAF6EE;   /* cards, panels                          */
-  --gh-surface-2:     #F6F1E6;   /* hover/active card surface              */
+  --gh-line:          #E5E2DC;   /* hairline borders, default              */
+  --gh-line-soft:     #EFEDE7;   /* divider rules inside cards             */
+  --gh-canvas:        #F5F4F1;   /* page background — neutral linen        */
+  --gh-canvas-deep:   #EFEEEA;   /* sidebar, inset surfaces                */
+  --gh-surface:       #FBFAF7;   /* cards, panels                          */
+  --gh-surface-2:     #F5F4F1;   /* hover/active card surface              */
   --gh-paper-white:   #FFFFFF;   /* used very sparingly — modal interior   */
 
   /* ---------- ACCENT (the mellow espresso — primary accent) ------------- */
@@ -30,6 +30,21 @@
   --gh-espresso-deep: #44190F;   /* hover on primary CTA                   */
   --gh-espresso-soft: #F1E3DC;   /* tinted background pill                 */
   --gh-espresso-line: #D9BFB3;   /* tinted border                          */
+
+  /* ---------- PANELS (washed-out tones for tiles, hero, quote blocks) --- */
+  /* Calm - washed slate-blue. Use for reflective panels, secondary tiles. */
+  --gh-panel-calm:        #8FA0AE;
+  --gh-panel-calm-soft:   #DCE2E7;
+  --gh-panel-calm-line:   #C2CBD3;
+  --gh-panel-calm-deep:   #6E7E8C;
+  --gh-panel-calm-on:     #FBFAF7;   /* text color when bg is calm-deep */
+
+  /* Warm - washed terracotta, sibling of espresso but lighter. */
+  --gh-panel-warm:        #B0594A;
+  --gh-panel-warm-soft:   #F0DDD7;
+  --gh-panel-warm-line:   #DCB7AD;
+  --gh-panel-warm-deep:   #8E4538;
+  --gh-panel-warm-on:     #FBFAF7;   /* text color when bg is warm-deep */
 
   /* Legacy aliases — moss is retained as a secondary tone, but the system */
   /* now leads with espresso. Existing components keep working unchanged.  */
@@ -64,8 +79,12 @@
   --gh-neutral-line:  #BFCAD5;
 
   /* ---------- TYPE ------------------------------------------------------ */
-  --gh-serif:  "Fraunces", "Lora", Georgia, serif;
+  /* Note: --gh-serif is intentionally aliased to the sans stack. Earlier
+     versions of this system used Fraunces; the current direction is
+     sans-only. Keeping the variable name lets existing components carry
+     the new font without code edits. */
   --gh-sans:   "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gh-serif:  var(--gh-sans);
   --gh-mono:   "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 
   /* base scale (rem on 16px root) */
@@ -157,17 +176,17 @@ html, body {
 h1, h2, h3, h4 {
   margin: 0;
   color: var(--gh-ink);
-  font-family: var(--gh-serif);
-  font-variation-settings: var(--gh-fraunces-soft);
+  font-family: var(--gh-sans);
+  font-weight: 600;
   letter-spacing: var(--gh-track-headline);
   line-height: var(--gh-lh-headline);
   text-wrap: pretty;
 }
 
-h1 { font-size: var(--gh-fs-h1); letter-spacing: var(--gh-track-display); line-height: var(--gh-lh-display); }
-h2 { font-size: var(--gh-fs-h2); }
-h3 { font-size: var(--gh-fs-h3); }
-h4 { font-size: var(--gh-fs-h4); font-variation-settings: var(--gh-fraunces-tight); }
+h1 { font-size: var(--gh-fs-h1); font-weight: 600; letter-spacing: var(--gh-track-display); line-height: var(--gh-lh-display); }
+h2 { font-size: var(--gh-fs-h2); font-weight: 600; }
+h3 { font-size: var(--gh-fs-h3); font-weight: 600; }
+h4 { font-size: var(--gh-fs-h4); font-weight: 600; }
 
 p { margin: 0; }
 
@@ -195,9 +214,9 @@ a { color: inherit; text-decoration: none; }
 }
 
 .gh-display {
-  font-family: var(--gh-serif);
-  font-variation-settings: var(--gh-fraunces-soft);
+  font-family: var(--gh-sans);
   font-size: var(--gh-fs-display);
+  font-weight: 600;
   letter-spacing: var(--gh-track-display);
   line-height: var(--gh-lh-display);
   color: var(--gh-ink);
@@ -205,9 +224,8 @@ a { color: inherit; text-decoration: none; }
 }
 
 .gh-quote {
-  font-family: var(--gh-serif);
-  font-variation-settings: var(--gh-fraunces-quote);
-  font-style: italic;
+  font-family: var(--gh-sans);
+  font-weight: 400;
   letter-spacing: 0;
   color: var(--gh-ink);
 }
