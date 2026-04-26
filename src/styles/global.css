@@ -1,0 +1,258 @@
+/* ==========================================================================
+   Growth Habitat — Global Styles
+   Element styles and utility classes consuming the tokens.
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+html, body {
+  margin: 0;
+  background: var(--gh-canvas);
+  color: var(--gh-ink-soft);
+  font-family: var(--gh-sans);
+  font-size: 15px;
+  line-height: var(--gh-lh-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  color: var(--gh-ink);
+  font-family: var(--gh-sans);
+  font-weight: 700;
+  letter-spacing: var(--gh-track-headline);
+  line-height: var(--gh-lh-headline);
+  text-wrap: pretty;
+}
+
+h1 {
+  font-size: var(--gh-fs-h1);
+  font-weight: 800;
+  letter-spacing: var(--gh-track-display);
+  line-height: var(--gh-lh-display);
+}
+h2 { font-size: var(--gh-fs-h2); font-weight: 700; }
+h3 { font-size: var(--gh-fs-h3); font-weight: 700; }
+h4 { font-size: var(--gh-fs-h4); font-weight: 600; }
+
+p { margin: 0; }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+code, kbd, samp {
+  font-family: var(--gh-mono);
+  font-size: 0.875em;
+}
+
+a { color: inherit; text-decoration: none; }
+
+::selection { background: var(--gh-rust-soft); color: var(--gh-ink); }
+
+/* ==========================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+
+.gh-eyebrow {
+  font-family: var(--gh-mono);
+  font-size: var(--gh-fs-eyebrow);
+  font-weight: 500;
+  letter-spacing: var(--gh-track-eyebrow);
+  line-height: 1;
+  color: var(--gh-faint);
+  text-transform: uppercase;
+}
+
+.gh-italic {
+  font-family: var(--gh-italic);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.gh-display {
+  font-family: var(--gh-sans);
+  font-size: var(--gh-fs-display);
+  font-weight: 800;
+  letter-spacing: var(--gh-track-display);
+  line-height: var(--gh-lh-display);
+  color: var(--gh-ink);
+  text-wrap: balance;
+}
+
+.gh-quote {
+  font-family: var(--gh-italic);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--gh-ink);
+}
+
+.gh-canvas {
+  background: var(--gh-canvas);
+}
+
+/* Card surfaces — three weights */
+.gh-card {
+  background: var(--gh-surface);
+  border: 1px solid var(--gh-line);
+  border-radius: var(--gh-r-panel);
+  box-shadow: var(--gh-shadow-card);
+  padding: var(--gh-space-5);
+}
+
+.gh-card-float {
+  background: var(--gh-surface);
+  border: 1px solid var(--gh-line);
+  border-radius: var(--gh-r-card);
+  box-shadow: var(--gh-shadow-float);
+}
+
+.gh-card-flat {
+  background: var(--gh-surface);
+  border: 1px solid var(--gh-line);
+  border-radius: var(--gh-r-panel);
+}
+
+/* ==========================================================================
+   FORM ELEMENTS
+   ========================================================================== */
+
+.gh-input,
+.gh-textarea,
+.gh-select {
+  width: 100%;
+  border: 1px solid var(--gh-line);
+  border-radius: var(--gh-r-control);
+  background: var(--gh-canvas);
+  color: var(--gh-ink);
+  font: inherit;
+  outline: none;
+  padding: 11px 12px;
+  transition:
+    border-color var(--gh-dur-base) var(--gh-ease),
+    background var(--gh-dur-base) var(--gh-ease),
+    box-shadow var(--gh-dur-base) var(--gh-ease);
+}
+
+.gh-input::placeholder,
+.gh-textarea::placeholder { color: var(--gh-faint); }
+
+.gh-textarea { min-height: 96px; resize: vertical; line-height: var(--gh-lh-body); }
+
+.gh-input:focus,
+.gh-textarea:focus,
+.gh-select:focus {
+  border-color: var(--gh-rust);
+  background: var(--gh-paper-white);
+  box-shadow: 0 0 0 3px var(--gh-focus);
+}
+
+/* ==========================================================================
+   BUTTONS
+   ========================================================================== */
+
+.gh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--gh-line);
+  border-radius: var(--gh-r-control);
+  background: var(--gh-surface);
+  color: var(--gh-ink);
+  font-family: var(--gh-sans);
+  font-size: var(--gh-fs-small);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--gh-dur-base) var(--gh-ease),
+    border-color var(--gh-dur-base) var(--gh-ease),
+    color var(--gh-dur-base) var(--gh-ease),
+    transform var(--gh-dur-fast) var(--gh-ease);
+}
+.gh-btn:hover { background: var(--gh-canvas); border-color: var(--gh-faint); }
+.gh-btn:active { transform: translateY(1px); }
+
+.gh-btn-primary {
+  background: var(--gh-rust);
+  border-color: var(--gh-rust);
+  color: var(--gh-canvas);
+}
+.gh-btn-primary:hover {
+  background: var(--gh-rust-deep);
+  border-color: var(--gh-rust-deep);
+}
+
+.gh-btn-dark {
+  background: var(--gh-ink);
+  border-color: var(--gh-ink);
+  color: var(--gh-canvas);
+}
+.gh-btn-dark:hover {
+  background: #000;
+  border-color: #000;
+}
+
+.gh-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--gh-muted);
+}
+.gh-btn-ghost:hover { color: var(--gh-ink); background: var(--gh-canvas-deep); }
+
+.gh-btn-sm { min-height: 30px; padding: 0 12px; font-size: var(--gh-fs-meta); }
+
+/* ==========================================================================
+   CHIPS / BADGES
+   ========================================================================== */
+
+.gh-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid var(--gh-line);
+  border-radius: var(--gh-r-pill);
+  background: var(--gh-canvas);
+  color: var(--gh-muted);
+  font-family: var(--gh-mono);
+  font-size: var(--gh-fs-eyebrow);
+  font-weight: 500;
+  letter-spacing: var(--gh-track-eyebrow);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.gh-chip-positive { color: var(--gh-positive); background: var(--gh-positive-soft); border-color: var(--gh-positive-line); }
+.gh-chip-caution  { color: var(--gh-caution);  background: var(--gh-caution-soft);  border-color: var(--gh-caution-line); }
+.gh-chip-warn     { color: var(--gh-warn);     background: var(--gh-warn-soft);     border-color: var(--gh-warn-line); }
+.gh-chip-neutral  { color: var(--gh-neutral);  background: var(--gh-neutral-soft);  border-color: var(--gh-neutral-line); }
+.gh-chip-rust     { color: var(--gh-rust);     background: var(--gh-rust-soft);     border-color: var(--gh-rust-line); }
+
+/* ==========================================================================
+   SCORE RAIL — 0–10 segmented bar
+   ========================================================================== */
+
+.gh-score-rail {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  width: 100%;
+}
+.gh-score-seg {
+  flex: 1;
+  background: var(--gh-line);
+  border-radius: 1px;
+  transition: background var(--gh-dur-base) var(--gh-ease);
+}
+.gh-score-seg.is-on { background: var(--gh-rust); }

@@ -1,0 +1,164 @@
+/* ==========================================================================
+   Growth Habitat — Design Tokens
+   Rust · slate · mist on warm cream. Sans-only with one editorial italic
+   accent reserved for hero moments.
+   ========================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@1,9..144,400&family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
+:root {
+  /* ---------- BRAND ---------------------------------------------------- */
+  --gh-ink:           #2A2826;
+  --gh-ink-soft:      #3B3834;
+  --gh-muted:         #5F5B55;
+  --gh-faint:         #9A958D;
+  --gh-line:          #E5E2DC;
+  --gh-line-soft:     #EFEDE7;
+  --gh-canvas:        #F5F4F1;
+  --gh-canvas-deep:   #EFEDE7;
+  --gh-surface:       #FBFAF7;
+  --gh-surface-2:     #F5F4F1;
+  --gh-paper-white:   #FFFFFF;
+
+  /* ---------- ACCENT (rust) -------------------------------------------- */
+  --gh-rust:          #73371B;
+  --gh-rust-deep:     #5A2A14;
+  --gh-rust-soft:     #F0DDD7;
+  --gh-rust-line:     #DCB7AD;
+
+  /* legacy aliases — espresso/moss now point at rust so older inline
+     references keep rendering correctly */
+  --gh-espresso:      var(--gh-rust);
+  --gh-espresso-deep: var(--gh-rust-deep);
+  --gh-espresso-soft: var(--gh-rust-soft);
+  --gh-espresso-line: var(--gh-rust-line);
+  --gh-moss:          var(--gh-rust);
+  --gh-moss-deep:     var(--gh-rust-deep);
+  --gh-moss-soft:     var(--gh-rust-soft);
+  --gh-moss-line:     var(--gh-rust-line);
+  --gh-focus:         rgba(115, 55, 27, 0.20);
+
+  /* ---------- PANELS --------------------------------------------------- */
+  /* Slate — reflective, observational, used for the closing panel and
+     the second tile of the three-tile rhythm. */
+  --gh-slate:         #2D3B47;
+  --gh-slate-deep:    #1E2A32;
+  --gh-slate-soft:    #DCE2E7;
+  --gh-slate-line:    #BAC4CC;
+  --gh-slate-on:      #F5F4F1;
+
+  /* Mist — soft cool note, breathing room between rust and slate. */
+  --gh-mist:          #EEF1EE;
+  --gh-mist-deep:     #DCE6E9;
+  --gh-mist-line:     #C9D8DD;
+
+  /* legacy panel aliases */
+  --gh-panel-calm:        var(--gh-slate);
+  --gh-panel-calm-soft:   var(--gh-slate-soft);
+  --gh-panel-calm-line:   var(--gh-slate-line);
+  --gh-panel-calm-deep:   var(--gh-slate-deep);
+  --gh-panel-calm-on:     var(--gh-slate-on);
+  --gh-panel-warm:        var(--gh-rust);
+  --gh-panel-warm-soft:   var(--gh-rust-soft);
+  --gh-panel-warm-line:   var(--gh-rust-line);
+  --gh-panel-warm-deep:   var(--gh-rust-deep);
+  --gh-panel-warm-on:     var(--gh-slate-on);
+
+  /* ---------- EVIDENCE -------------------------------------------------- */
+  --gh-positive:      #5C6B57;
+  --gh-positive-soft: #E6EAE2;
+  --gh-positive-line: #C5CCBE;
+
+  --gh-caution:       #9C7A3C;
+  --gh-caution-soft:  #F4ECDB;
+  --gh-caution-line:  #E0D2B0;
+
+  --gh-warn:          #C8311F;
+  --gh-warn-deep:     #A12515;
+  --gh-warn-soft:     #F8DDD7;
+  --gh-warn-line:     #E8A99E;
+
+  --gh-neutral:       #5A6F8A;
+  --gh-neutral-soft:  #E4E8ED;
+  --gh-neutral-line:  #BFCAD5;
+
+  --gh-sage:          #5C6B57;
+  --gh-sage-soft:     #E6EAE2;
+  --gh-sage-line:     #C5CCBE;
+
+  /* ---------- TYPE ------------------------------------------------------ */
+  /* --gh-serif aliases the sans stack for body work; the system uses
+     Fraunces only for occasional editorial italic accents (e.g. one word
+     in the hero headline, the closing quote). Use --gh-italic explicitly
+     for those moments. */
+  --gh-sans:    "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --gh-italic:  "Fraunces", Georgia, serif;
+  --gh-serif:   var(--gh-sans);
+  --gh-mono:    "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --gh-fs-eyebrow: 0.6875rem;
+  --gh-fs-meta:    0.75rem;
+  --gh-fs-small:   0.8125rem;
+  --gh-fs-body:    0.9375rem;
+  --gh-fs-lead:    1.0625rem;
+  --gh-fs-h4:      1.125rem;
+  --gh-fs-h3:      1.5rem;
+  --gh-fs-h2:      1.875rem;
+  --gh-fs-h1:      3.5rem;
+  --gh-fs-display: 4.5rem;
+
+  --gh-track-eyebrow:  0.08em;
+  --gh-track-display:  -0.04em;
+  --gh-track-headline: -0.02em;
+  --gh-track-tight:    -0.01em;
+
+  --gh-lh-display:  1.0;
+  --gh-lh-headline: 1.1;
+  --gh-lh-body:     1.55;
+  --gh-lh-tight:    1.3;
+
+  /* ---------- SPACING --------------------------------------------------- */
+  --gh-space-1: 4px;
+  --gh-space-2: 8px;
+  --gh-space-3: 12px;
+  --gh-space-4: 16px;
+  --gh-space-5: 24px;
+  --gh-space-6: 32px;
+  --gh-space-7: 48px;
+  --gh-space-8: 64px;
+  --gh-space-9: 96px;
+
+  /* ---------- RADII ----------------------------------------------------- */
+  --gh-r-micro:   2px;
+  --gh-r-control: 8px;
+  --gh-r-panel:   16px;
+  --gh-r-card:    20px;
+  --gh-r-pill:    999px;
+
+  /* ---------- SHADOW ---------------------------------------------------- */
+  --gh-shadow-hairline: 0 1px 0 rgba(42, 40, 38, 0.04);
+  --gh-shadow-card:     0 1px 0 rgba(42, 40, 38, 0.04), 0 2px 4px rgba(42, 40, 38, 0.03);
+  --gh-shadow-float:    0 8px 32px rgba(42, 40, 38, 0.06), 0 1px 2px rgba(42, 40, 38, 0.04);
+  --gh-shadow-modal:    0 24px 60px rgba(42, 40, 38, 0.12), 0 2px 4px rgba(42, 40, 38, 0.04);
+
+  /* ---------- LAYOUT ---------------------------------------------------- */
+  --gh-sidebar-w:     144px;
+  --gh-sidebar-inset: 20px;
+  --gh-content-max:   1240px;
+
+  /* ---------- MOTION ---------------------------------------------------- */
+  --gh-ease:      cubic-bezier(0.2, 0, 0, 1);
+  --gh-ease-out:  cubic-bezier(0.2, 0, 0, 1);
+  --gh-dur-fast:  140ms;
+  --gh-dur-base:  240ms;
+  --gh-dur-slow:  400ms;
+  --gh-dur-page:  280ms;
+  --gh-dur-count: 600ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
