@@ -1,0 +1,1730 @@
+From: Growth Habitat build assistant
+Subject: [PATCH] Conversations: three-step form, card list, live wiring
+
+Patch 04. The evidence-collection floor goes live. Conversations is now a
+fully working surface — log them, edit them, see them surface on the
+Command Center.
+
+Files modified
+--------------
+src/App.tsx — Adds /conversations and /conversations/:id routes.
+src/components/Primitives.tsx — Adds five new primitives:
+  - ChipMultiSelect for tagging energy gains/drains
+  - SegmentedSelect for trust signal, evidence strength, work-with checks
+  - CheckboxRow for market pull signals
+  - StepIndicator for the multi-step form navigation
+  - onClick prop added to existing Tile component
+src/pages/CommandCenter.tsx — Wires "Add talk" button to create a blank
+  conversation and navigate to its editor. Strongest direction tile and
+  best conversation tile are now clickable. Empty-state best conversation
+  tile click also creates a new conversation.
+
+Files added
+-----------
+src/components/ConversationForm.tsx — Multi-step form with autosave on every
+  field. Step 1: who/when (person, org, role, date, related direction,
+  evidence strength). Step 2: energy & signal (energy before/after, five
+  Buffett-lens scores, trust signal three-state, work-with-on-hard-problem
+  yes/maybe/no). Step 3: insight & follow-up (key insight, six market pull
+  checkboxes, energy gain/drain tags pulled from Profile, free notes,
+  follow-up action). Step indicator at top supports clicking to jump.
+
+src/components/ConversationCard.tsx — Single card row for the list view.
+  Shows person, org/role, energy gain as a chip, evidence strength,
+  key insight as a serif pull-quote, follow-up action, related direction,
+  date, signal average. Hover effect, click to edit.
+
+src/pages/Conversations.tsx — List page. Sorted most-recent-first.
+  Empty state copy: "Conversations are experiments. Log them within
+  24 hours — memory edits the data."
+
+src/pages/Conversation.tsx — Single conversation editor page wrapping
+  the multi-step form. Crumbs show person name, breadcrumb back to
+  list, quiet saving indicator in topbar.
+
+Data shape
+----------
+The Conversation type was already in place from patch 03. This patch only
+uses existing fields. Market pull signals are stored as a prefix tag in
+the notes field for now: `[market_pull:asked_for_followup,introduced_me] ...`
+The form transparently handles this prefix; the user sees clean notes.
+A typed marketPull[] field will be promoted in patch 04b alongside
+Opportunities — a schema migration, not done in this patch to keep scope
+tight.
+
+UX decisions
+------------
+- Three-step flow (not single long form). Lighter cognitive load when
+  logging right after a conversation. Steps autosave per-field, so
+  abandoning mid-flow doesn't lose data.
+- Card list (not table). Each conversation is an artifact, not a row.
+- Empty state is the page (not an onboarding CTA). The product instructs
+  through being itself.
+- Date defaults to today. Reduces friction for the 90% case.
+- Quick-add: clicking "Add talk" creates a blank conversation immediately
+  and navigates to its editor. No modal, no in-between state.
+
+Apply with:
+    git apply 0004-conversations.patch
+
+Or with plain patch:
+    patch -p1 < 0004-conversations.patch
+
+Verify:
+    npm run build
+    npm run dev
+
+Then in the browser:
+1. Click "03 Talks" in the sidebar — empty state appears
+2. Click "Log your first conversation" — multi-step form appears
+3. Fill step 1, click Continue — step 2 appears, data persists
+4. Fill some scores, click back — step 1 still has your data
+5. Click step 3 directly via the step indicator — it works
+6. Click "Save & close" — back at the list, your conversation is there
+7. Click the card — back into the editor
+8. Go to Command Center — best conversation tile shows your entry
+9. Click the tile — opens the conversation
+
+---
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -3,6 +3,8 @@
+ import CommandCenter from "./pages/CommandCenter";
+ import ProfilePage from "./pages/Profile";
+ import DirectionsPage from "./pages/Directions";
++import ConversationsPage from "./pages/Conversations";
++import ConversationPage from "./pages/Conversation";
+ import { StubPage } from "./pages/StubPage";
+ import { StoreProvider, useProfile, useConversations } from "./lib/store";
+ 
+@@ -47,16 +49,8 @@
+           <Route path="/" element={<CommandCenter />} />
+           <Route path="/profile" element={<ProfilePage />} />
+           <Route path="/directions" element={<DirectionsPage />} />
+-          <Route
+-            path="/conversations"
+-            element={
+-              <StubPage
+-                num="03"
+-                title="Talks"
+-                subtitle="Use real conversations to test where your value is recognized."
+-              />
+-            }
+-          />
++          <Route path="/conversations" element={<ConversationsPage />} />
++          <Route path="/conversations/:id" element={<ConversationPage />} />
+           <Route
+             path="/opportunities"
+             element={
+--- a/src/components/Primitives.tsx
++++ b/src/components/Primitives.tsx
+@@ -267,6 +267,7 @@
+   footer,
+   italic = false,
+   meta,
++  onClick,
+ }: {
+   tone: TileTone;
+   eyebrow: string;
+@@ -276,6 +277,7 @@
+   footer?: ReactNode;
+   italic?: boolean;
+   meta?: string;
++  onClick?: () => void;
+ }) {
+   const palette =
+     tone === "rust"
+@@ -290,9 +292,11 @@
+ 
+   return (
+     <div
++      onClick={onClick}
+       style={{
+         background: palette.bg,
+         color: palette.fg,
++        cursor: onClick ? "pointer" : "default",
+         borderRadius: 16,
+         border: dim ? "none" : `1px solid ${palette.line}`,
+         boxShadow: dim ? "var(--gh-shadow-card)" : "var(--gh-shadow-hairline)",
+@@ -752,3 +756,338 @@
+   );
+ }
+ 
++// ==========================================================================
++// Chip multi-select (used for tagging energy gains/drains from Profile)
++// ==========================================================================
++
++export function ChipMultiSelect({
++  options,
++  selected,
++  onChange,
++  emptyLabel = "No options yet",
++  tone = "neutral",
++}: {
++  options: string[];
++  selected: string[];
++  onChange: (next: string[]) => void;
++  emptyLabel?: string;
++  tone?: "rust" | "slate" | "neutral";
++}) {
++  if (options.length === 0) {
++    return (
++      <div
++        style={{
++          fontSize: 13,
++          color: "var(--gh-faint)",
++          fontStyle: "italic",
++        }}
++      >
++        {emptyLabel}
++      </div>
++    );
++  }
++
++  const toggle = (opt: string) => {
++    onChange(
++      selected.includes(opt)
++        ? selected.filter((s) => s !== opt)
++        : [...selected, opt]
++    );
++  };
++
++  const palette =
++    tone === "rust"
++      ? {
++          on: { bg: "var(--gh-rust)", fg: "var(--gh-canvas)", border: "var(--gh-rust)" },
++          off: { bg: "var(--gh-surface)", fg: "var(--gh-muted)", border: "var(--gh-line)" },
++        }
++      : tone === "slate"
++      ? {
++          on: { bg: "var(--gh-slate)", fg: "var(--gh-canvas)", border: "var(--gh-slate)" },
++          off: { bg: "var(--gh-surface)", fg: "var(--gh-muted)", border: "var(--gh-line)" },
++        }
++      : {
++          on: { bg: "var(--gh-ink)", fg: "var(--gh-canvas)", border: "var(--gh-ink)" },
++          off: { bg: "var(--gh-surface)", fg: "var(--gh-muted)", border: "var(--gh-line)" },
++        };
++
++  return (
++    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
++      {options.map((opt) => {
++        const on = selected.includes(opt);
++        const p = on ? palette.on : palette.off;
++        return (
++          <button
++            key={opt}
++            type="button"
++            onClick={() => toggle(opt)}
++            style={{
++              padding: "6px 12px",
++              borderRadius: 999,
++              border: `1px solid ${p.border}`,
++              background: p.bg,
++              color: p.fg,
++              fontFamily: "var(--gh-sans)",
++              fontSize: 12.5,
++              fontWeight: 500,
++              cursor: "pointer",
++              maxWidth: 380,
++              textAlign: "left",
++              lineHeight: 1.35,
++              transition: "all var(--gh-dur-base) var(--gh-ease)",
++            }}
++          >
++            {opt}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
++
++// ==========================================================================
++// Segmented selector (3-state toggles like Trust signal, Evidence strength)
++// ==========================================================================
++
++export function SegmentedSelect<T extends string>({
++  options,
++  value,
++  onChange,
++  ariaLabel,
++}: {
++  options: { value: T; label: string; helper?: string }[];
++  value: T | undefined;
++  onChange: (next: T) => void;
++  ariaLabel?: string;
++}) {
++  return (
++    <div
++      role="group"
++      aria-label={ariaLabel}
++      style={{
++        display: "grid",
++        gridTemplateColumns: `repeat(${options.length}, 1fr)`,
++        gap: 4,
++        padding: 4,
++        background: "var(--gh-canvas-deep)",
++        border: "1px solid var(--gh-line)",
++        borderRadius: 10,
++      }}
++    >
++      {options.map((opt) => {
++        const on = value === opt.value;
++        return (
++          <button
++            key={opt.value}
++            type="button"
++            onClick={() => onChange(opt.value)}
++            style={{
++              padding: "8px 10px",
++              borderRadius: 6,
++              border: "none",
++              background: on ? "var(--gh-surface)" : "transparent",
++              color: on ? "var(--gh-ink)" : "var(--gh-muted)",
++              fontFamily: "var(--gh-sans)",
++              fontSize: 12.5,
++              fontWeight: on ? 600 : 500,
++              cursor: "pointer",
++              boxShadow: on ? "var(--gh-shadow-hairline)" : "none",
++              transition: "all var(--gh-dur-base) var(--gh-ease)",
++              display: "flex",
++              flexDirection: "column",
++              alignItems: "flex-start",
++              gap: 2,
++              textAlign: "left",
++            }}
++          >
++            <span>{opt.label}</span>
++            {opt.helper && (
++              <span
++                style={{
++                  fontSize: 10.5,
++                  color: on ? "var(--gh-muted)" : "var(--gh-faint)",
++                  fontWeight: 400,
++                }}
++              >
++                {opt.helper}
++              </span>
++            )}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
++
++// ==========================================================================
++// Checkbox row (used for Market pull signals)
++// ==========================================================================
++
++export function CheckboxRow({
++  label,
++  helper,
++  checked,
++  onChange,
++}: {
++  label: string;
++  helper?: string;
++  checked: boolean;
++  onChange: (next: boolean) => void;
++}) {
++  return (
++    <button
++      type="button"
++      onClick={() => onChange(!checked)}
++      style={{
++        display: "flex",
++        gap: 12,
++        alignItems: "flex-start",
++        padding: "10px 12px",
++        background: checked ? "var(--gh-rust-soft)" : "var(--gh-surface)",
++        border: `1px solid ${checked ? "var(--gh-rust-line)" : "var(--gh-line)"}`,
++        borderRadius: 10,
++        cursor: "pointer",
++        textAlign: "left",
++        width: "100%",
++        transition: "all var(--gh-dur-base) var(--gh-ease)",
++      }}
++    >
++      <div
++        style={{
++          width: 18,
++          height: 18,
++          borderRadius: 4,
++          border: `1.5px solid ${checked ? "var(--gh-rust)" : "var(--gh-line)"}`,
++          background: checked ? "var(--gh-rust)" : "transparent",
++          flexShrink: 0,
++          marginTop: 1,
++          display: "grid",
++          placeItems: "center",
++          color: "var(--gh-canvas)",
++          fontSize: 11,
++        }}
++      >
++        {checked && "✓"}
++      </div>
++      <div>
++        <div
++          style={{
++            fontSize: 13,
++            fontWeight: 500,
++            color: checked ? "var(--gh-rust-deep)" : "var(--gh-ink)",
++            lineHeight: 1.4,
++          }}
++        >
++          {label}
++        </div>
++        {helper && (
++          <div
++            style={{
++              marginTop: 2,
++              fontSize: 11.5,
++              color: "var(--gh-muted)",
++              lineHeight: 1.4,
++            }}
++          >
++            {helper}
++          </div>
++        )}
++      </div>
++    </button>
++  );
++}
++
++// ==========================================================================
++// Step indicator (used for the multi-step Conversation form)
++// ==========================================================================
++
++export function StepIndicator({
++  steps,
++  current,
++  onJump,
++}: {
++  steps: { label: string; sub?: string }[];
++  current: number;
++  onJump?: (index: number) => void;
++}) {
++  return (
++    <div
++      style={{
++        display: "grid",
++        gridTemplateColumns: `repeat(${steps.length}, 1fr)`,
++        gap: 0,
++        marginBottom: 32,
++        position: "relative",
++      }}
++    >
++      {steps.map((s, i) => {
++        const done = i < current;
++        const active = i === current;
++        const clickable = !!onJump;
++        return (
++          <button
++            key={i}
++            type="button"
++            onClick={clickable ? () => onJump!(i) : undefined}
++            disabled={!clickable}
++            style={{
++              border: "none",
++              background: "transparent",
++              padding: "12px 8px",
++              cursor: clickable ? "pointer" : "default",
++              textAlign: "left",
++              borderTop: `2px solid ${
++                active
++                  ? "var(--gh-rust)"
++                  : done
++                  ? "var(--gh-rust-line)"
++                  : "var(--gh-line)"
++              }`,
++              transition: "border-color var(--gh-dur-base) var(--gh-ease)",
++            }}
++          >
++            <div
++              style={{
++                fontFamily: "var(--gh-mono)",
++                fontSize: 10.5,
++                color: active
++                  ? "var(--gh-rust)"
++                  : done
++                  ? "var(--gh-muted)"
++                  : "var(--gh-faint)",
++                textTransform: "uppercase",
++                letterSpacing: "0.06em",
++                fontWeight: 600,
++                marginBottom: 6,
++              }}
++            >
++              {`Step ${i + 1}${done ? " ✓" : ""}`}
++            </div>
++            <div
++              style={{
++                fontSize: 14,
++                fontWeight: active ? 700 : 500,
++                color: active ? "var(--gh-ink)" : "var(--gh-muted)",
++                letterSpacing: "-0.01em",
++              }}
++            >
++              {s.label}
++            </div>
++            {s.sub && (
++              <div
++                style={{
++                  marginTop: 4,
++                  fontSize: 12,
++                  color: "var(--gh-faint)",
++                  lineHeight: 1.4,
++                }}
++              >
++                {s.sub}
++              </div>
++            )}
++          </button>
++        );
++      })}
++    </div>
++  );
++}
+--- a/src/pages/CommandCenter.tsx
++++ b/src/pages/CommandCenter.tsx
+@@ -1,3 +1,4 @@
++import { useNavigate } from "react-router-dom";
+ import {
+   Btn,
+   Card,
+@@ -78,9 +79,10 @@
+ // ---------- Page ---------------------------------------------------------
+ 
+ export default function CommandCenter() {
++  const navigate = useNavigate();
+   const { profile } = useProfile();
+   const { directions } = useDirections();
+-  const { conversations } = useConversations();
++  const { conversations, add: addConversation } = useConversations();
+   const { opportunities } = useOpportunities();
+   const { current: hyp } = useCurrentHypothesis();
+ 
+@@ -88,6 +90,33 @@
+   const strongest = strongestDirection(directions);
+   const bestConv = bestRecentConversation(conversations);
+ 
++  // Quick-add: create a blank conversation and jump to its editor
++  const handleAddConversation = () => {
++    const created = addConversation({
++      person: "",
++      organization: "",
++      role: "",
++      relatedDirectionId: undefined,
++      date: new Date().toISOString().slice(0, 10),
++      energyBefore: undefined,
++      energyAfter: undefined,
++      admirationScore: undefined,
++      learningPotentialScore: undefined,
++      recognitionScore: undefined,
++      autonomyScore: undefined,
++      marketPullScore: undefined,
++      trustSignal: undefined,
++      evidenceStrength: "medium",
++      taggedEnergyGains: [],
++      taggedEnergyDrains: [],
++      workWithOnHardProblem: undefined,
++      keyInsight: "",
++      notes: "",
++      followUpAction: "",
++    });
++    navigate(`/conversations/${created.id}`);
++  };
++
+   const today = new Date().toLocaleDateString("en-GB", {
+     day: "numeric",
+     month: "short",
+@@ -150,7 +179,7 @@
+       crumbs={["Career discovery", "Home"]}
+       actions={
+         <>
+-          <Btn sm>Add talk</Btn>
++          <Btn sm onClick={handleAddConversation}>Add talk</Btn>
+           <Btn sm>Add role</Btn>
+           <Btn sm variant="dark">
+             Export brief
+@@ -302,6 +331,7 @@
+           {strongest ? (
+             <Tile
+               tone="rust"
++              onClick={() => navigate("/directions")}
+               eyebrow="Strongest direction · pursue"
+               badge={
+                 strongestAvg !== undefined && (
+@@ -345,6 +375,7 @@
+           {bestConv ? (
+             <Tile
+               tone="slate"
++              onClick={() => navigate(`/conversations/${bestConv.id}`)}
+               eyebrow="Best conversation · reflect"
+               badge={
+                 typeof bestGain === "number" && (
+@@ -375,6 +406,7 @@
+           ) : (
+             <Tile
+               tone="mist"
++              onClick={handleAddConversation}
+               eyebrow="Best conversation · empty"
+               title="No conversations logged yet"
+               body="Conversations are experiments. Log them within 24 hours — memory edits the data."
+--- a/src/components/ConversationForm.tsx
++++ b/src/components/ConversationForm.tsx
+@@ -0,0 +1,638 @@
++/* ==========================================================================
++   Growth Habitat — Conversation Form
++   Three-step flow:
++     Step 1 — Who & when (5 fields)
++     Step 2 — Energy, trust, evidence (10 fields)
++     Step 3 — Insight & follow-up (5 fields)
++   The conversation entity persists from step 1 onward — every field commits
++   on blur via autosave, so leaving the form mid-flow doesn't lose data.
++   ========================================================================== */
++
++import { useState } from "react";
++import {
++  AutosaveInput,
++  AutosaveScore,
++  AutosaveTextarea,
++  Btn,
++  CheckboxRow,
++  ChipMultiSelect,
++  Eyebrow,
++  SegmentedSelect,
++  StepIndicator,
++} from "./Primitives";
++import {
++  useConversations,
++  useDirections,
++  useProfile,
++} from "../lib/store";
++import type {
++  Conversation,
++  EvidenceStrength,
++  TrustSignal,
++} from "../types/entities";
++
++// ---------- Constants ---------------------------------------------------
++
++const STEPS = [
++  { label: "Who & when", sub: "Person, organization, related direction" },
++  { label: "Energy & signal", sub: "Buffett lens scores and trust" },
++  { label: "Insight & follow-up", sub: "What you learned. What's next." },
++];
++
++const TRUST_OPTIONS: { value: TrustSignal; label: string; helper: string }[] = [
++  { value: "forming", label: "Trust forming", helper: "Real signal" },
++  { value: "not_enough_signal", label: "Not enough signal", helper: "Too early" },
++  { value: "concern", label: "Trust concern", helper: "Off note" },
++];
++
++const EVIDENCE_OPTIONS: {
++  value: EvidenceStrength;
++  label: string;
++  helper: string;
++}[] = [
++  { value: "weak", label: "Weak", helper: "Read it" },
++  { value: "medium", label: "Medium", helper: "Touched it" },
++  { value: "strong", label: "Strong", helper: "Engaged with it" },
++];
++
++const MARKET_PULL_SIGNALS = [
++  {
++    key: "asked_for_followup",
++    label: "Asked for a follow-up",
++    helper: "They want another conversation",
++  },
++  {
++    key: "asked_for_artifact",
++    label: "Asked for an artifact",
++    helper: "Deck, doc, framework — they want something tangible",
++  },
++  {
++    key: "introduced_me",
++    label: "Introduced me to someone",
++    helper: "Network signal — they want to share you",
++  },
++  {
++    key: "named_role_or_problem",
++    label: "Named a role or specific problem you'd fit",
++    helper: "They mapped you to a real opening",
++  },
++  {
++    key: "asked_about_availability",
++    label: "Asked about your availability",
++    helper: "Direct interest in working together",
++  },
++  {
++    key: "no_pull_yet",
++    label: "No pull yet",
++    helper: "Honest — nice talk, no traction",
++  },
++];
++
++// ---------- Form -------------------------------------------------------
++
++export function ConversationForm({
++  conversationId,
++  onDone,
++}: {
++  conversationId: string;
++  onDone?: () => void;
++}) {
++  const { conversations, update, remove } = useConversations();
++  const { directions } = useDirections();
++  const { profile } = useProfile();
++
++  const conv = conversations.find((c) => c.id === conversationId);
++
++  const [step, setStep] = useState(0);
++  // Market pull lives in the notes field as a JSON tag for now to avoid
++  // a schema migration. Pragmatic choice: it's still queryable, still
++  // exported, and we can promote it to a typed field in patch 04b.
++  const [marketPull, setMarketPull] = useState<string[]>(() => {
++    if (!conv?.notes) return [];
++    const match = conv.notes.match(/^\[market_pull:([^\]]*)\]\s*/);
++    return match ? match[1].split(",").filter(Boolean) : [];
++  });
++
++  if (!conv) {
++    return (
++      <div style={{ color: "var(--gh-muted)" }}>
++        Conversation not found. It may have been deleted.
++      </div>
++    );
++  }
++
++  const onUpdate = (patch: Partial<Conversation>) => update(conv.id, patch);
++
++  // Toggle a market pull signal and persist into notes prefix
++  const toggleMarketPull = (key: string) => {
++    const next = marketPull.includes(key)
++      ? marketPull.filter((k) => k !== key)
++      : [...marketPull, key];
++    setMarketPull(next);
++    // Strip existing prefix and write new one
++    const stripped = (conv.notes || "").replace(
++      /^\[market_pull:[^\]]*\]\s*/,
++      ""
++    );
++    const prefix = next.length > 0 ? `[market_pull:${next.join(",")}] ` : "";
++    onUpdate({ notes: prefix + stripped });
++  };
++
++  const handleDelete = () => {
++    if (
++      window.confirm(
++        `Delete this conversation${conv.person ? ` with ${conv.person}` : ""}? This can't be undone.`
++      )
++    ) {
++      remove(conv.id);
++      onDone?.();
++    }
++  };
++
++  return (
++    <div>
++      {/* Step indicator */}
++      <StepIndicator
++        steps={STEPS}
++        current={step}
++        onJump={(i) => setStep(i)}
++      />
++
++      {/* ===================== Step 1: Who & when ===================== */}
++      {step === 0 && (
++        <div style={{ display: "grid", gap: 24 }}>
++          <FormField
++            label="Person"
++            helper="Their name. Use a clear placeholder if it's not yet a real contact (e.g. 'Microsoft Partner Conversation')."
++          >
++            <AutosaveInput
++              value={conv.person}
++              onSave={(v) => onUpdate({ person: v })}
++              ariaLabel="Person"
++              placeholder="Name or descriptive placeholder"
++            />
++          </FormField>
++
++          <div
++            style={{
++              display: "grid",
++              gridTemplateColumns: "1fr 1fr",
++              gap: 16,
++            }}
++          >
++            <FormField
++              label="Organization"
++              helper="Where they work, or the context."
++            >
++              <AutosaveInput
++                value={conv.organization}
++                onSave={(v) => onUpdate({ organization: v })}
++                ariaLabel="Organization"
++                placeholder="Company, institution, or context"
++              />
++            </FormField>
++
++            <FormField label="Role" helper="Their title or role.">
++              <AutosaveInput
++                value={conv.role}
++                onSave={(v) => onUpdate({ role: v })}
++                ariaLabel="Role"
++                placeholder="e.g. Head of Modern Work"
++              />
++            </FormField>
++          </div>
++
++          <div
++            style={{
++              display: "grid",
++              gridTemplateColumns: "1fr 1fr",
++              gap: 16,
++            }}
++          >
++            <FormField
++              label="Date"
++              helper="When the conversation happened."
++            >
++              <input
++                type="date"
++                className="gh-input"
++                value={conv.date.slice(0, 10)}
++                onChange={(e) => onUpdate({ date: e.target.value })}
++                aria-label="Date"
++              />
++            </FormField>
++
++            <FormField
++              label="Related direction"
++              helper="Which direction this conversation tests."
++            >
++              <select
++                className="gh-select"
++                value={conv.relatedDirectionId ?? ""}
++                onChange={(e) =>
++                  onUpdate({
++                    relatedDirectionId: e.target.value || undefined,
++                  })
++                }
++                aria-label="Related direction"
++              >
++                <option value="">— None / unclassified</option>
++                {directions
++                  .filter((d) => d.status !== "avoid")
++                  .map((d) => (
++                    <option key={d.id} value={d.id}>
++                      {d.name}
++                    </option>
++                  ))}
++              </select>
++            </FormField>
++          </div>
++
++          <FormField
++            label="Evidence strength"
++            helper="Honest weight. A read article is weak; a deep working conversation is strong. The pattern engine uses this."
++          >
++            <SegmentedSelect
++              options={EVIDENCE_OPTIONS}
++              value={conv.evidenceStrength}
++              onChange={(v) => onUpdate({ evidenceStrength: v })}
++              ariaLabel="Evidence strength"
++            />
++          </FormField>
++
++          <StepNav
++            onBack={null}
++            onNext={() => setStep(1)}
++            onCancel={onDone}
++            onDelete={handleDelete}
++          />
++        </div>
++      )}
++
++      {/* ===================== Step 2: Energy & signal ===================== */}
++      {step === 1 && (
++        <div style={{ display: "grid", gap: 24 }}>
++          <div>
++            <Eyebrow style={{ marginBottom: 12 }}>
++              Energy · before vs after the conversation
++            </Eyebrow>
++            <div
++              style={{
++                display: "grid",
++                gridTemplateColumns: "1fr 1fr",
++                gap: 16,
++                background: "var(--gh-mist)",
++                border: "1px solid var(--gh-mist-line)",
++                borderRadius: 12,
++                padding: 16,
++              }}
++            >
++              <ScoreField
++                label="Energy before"
++                helper="1 = drained · 5 = neutral · 10 = energized"
++                value={conv.energyBefore}
++                onChange={(v) => onUpdate({ energyBefore: v })}
++              />
++              <ScoreField
++                label="Energy after"
++                helper="Same scale. Difference = real signal."
++                value={conv.energyAfter}
++                onChange={(v) => onUpdate({ energyAfter: v })}
++              />
++            </div>
++          </div>
++
++          <div>
++            <Eyebrow style={{ marginBottom: 12 }}>
++              Buffett lens · 1–10
++            </Eyebrow>
++            <div style={{ display: "grid", gap: 18 }}>
++              <ScoreField
++                label="Admiration"
++                helper="Do I admire how they work?"
++                value={conv.admirationScore}
++                onChange={(v) => onUpdate({ admirationScore: v })}
++              />
++              <ScoreField
++                label="Learning potential"
++                helper="Would this sharpen me?"
++                value={conv.learningPotentialScore}
++                onChange={(v) => onUpdate({ learningPotentialScore: v })}
++              />
++              <ScoreField
++                label="Recognition"
++                helper="Did they understand my value?"
++                value={conv.recognitionScore}
++                onChange={(v) => onUpdate({ recognitionScore: v })}
++              />
++              <ScoreField
++                label="Autonomy"
++                helper="Would I have room to shape the work?"
++                value={conv.autonomyScore}
++                onChange={(v) => onUpdate({ autonomyScore: v })}
++              />
++              <ScoreField
++                label="Market pull"
++                helper="Did the world reach toward me?"
++                value={conv.marketPullScore}
++                onChange={(v) => onUpdate({ marketPullScore: v })}
++              />
++            </div>
++          </div>
++
++          <FormField
++            label="Trust signal"
++            helper="Three honest states. 'Not enough signal' is the right answer for most early conversations."
++          >
++            <SegmentedSelect
++              options={TRUST_OPTIONS}
++              value={conv.trustSignal}
++              onChange={(v) => onUpdate({ trustSignal: v })}
++              ariaLabel="Trust signal"
++            />
++          </FormField>
++
++          <FormField
++            label="Would I work with them on a hard problem next month?"
++            helper="The integration test. Politely interested doesn't pass it."
++          >
++            <SegmentedSelect
++              options={[
++                { value: "yes", label: "Yes" },
++                { value: "maybe", label: "Maybe" },
++                { value: "no", label: "No" },
++              ]}
++              value={conv.workWithOnHardProblem}
++              onChange={(v) => onUpdate({ workWithOnHardProblem: v })}
++              ariaLabel="Would I work with them on a hard problem"
++            />
++          </FormField>
++
++          <StepNav
++            onBack={() => setStep(0)}
++            onNext={() => setStep(2)}
++            onCancel={onDone}
++            onDelete={handleDelete}
++          />
++        </div>
++      )}
++
++      {/* ===================== Step 3: Insight & follow-up ===================== */}
++      {step === 2 && (
++        <div style={{ display: "grid", gap: 24 }}>
++          <FormField
++            label="Key insight"
++            helper="One sentence. What did this conversation actually teach you that you didn't know before?"
++          >
++            <AutosaveTextarea
++              value={conv.keyInsight}
++              onSave={(v) => onUpdate({ keyInsight: v })}
++              ariaLabel="Key insight"
++              placeholder="e.g. 'The market gap they described — Copilot rolled out without governance — is exactly the work I do.'"
++              rows={2}
++            />
++          </FormField>
++
++          <div>
++            <Eyebrow style={{ marginBottom: 8 }}>
++              Market pull observed
++            </Eyebrow>
++            <div
++              style={{
++                fontSize: 13,
++                color: "var(--gh-muted)",
++                marginBottom: 12,
++                lineHeight: 1.5,
++              }}
++            >
++              Did the world pull on you? This separates nice conversations
++              from real signals.
++            </div>
++            <div style={{ display: "grid", gap: 6 }}>
++              {MARKET_PULL_SIGNALS.map((sig) => (
++                <CheckboxRow
++                  key={sig.key}
++                  label={sig.label}
++                  helper={sig.helper}
++                  checked={marketPull.includes(sig.key)}
++                  onChange={() => toggleMarketPull(sig.key)}
++                />
++              ))}
++            </div>
++          </div>
++
++          <FormField
++            label="Energy gains triggered"
++            helper="From your Profile. Tag what this conversation activated."
++          >
++            <ChipMultiSelect
++              options={profile.energyGains}
++              selected={conv.taggedEnergyGains}
++              onChange={(v) => onUpdate({ taggedEnergyGains: v })}
++              tone="rust"
++              emptyLabel="No energy gains in your Profile yet. Add some first."
++            />
++          </FormField>
++
++          <FormField
++            label="Energy drains triggered"
++            helper="Equally important. What in this conversation drained you?"
++          >
++            <ChipMultiSelect
++              options={profile.energyDrains}
++              selected={conv.taggedEnergyDrains}
++              onChange={(v) => onUpdate({ taggedEnergyDrains: v })}
++              tone="slate"
++              emptyLabel="No energy drains in your Profile yet."
++            />
++          </FormField>
++
++          <FormField
++            label="Notes"
++            helper="Anything else you want to remember. Quotes, role language, references, half-thoughts."
++          >
++            <AutosaveTextarea
++              value={(conv.notes || "").replace(
++                /^\[market_pull:[^\]]*\]\s*/,
++                ""
++              )}
++              onSave={(v) => {
++                // Preserve the market_pull prefix when updating notes
++                const prefix =
++                  marketPull.length > 0
++                    ? `[market_pull:${marketPull.join(",")}] `
++                    : "";
++                onUpdate({ notes: prefix + v });
++              }}
++              ariaLabel="Notes"
++              rows={4}
++              placeholder="Free notes — quotes, role language, references…"
++            />
++          </FormField>
++
++          <FormField
++            label="Follow-up action"
++            helper="One concrete thing within 7 days. If you can't articulate it, there isn't one."
++          >
++            <AutosaveInput
++              value={conv.followUpAction}
++              onSave={(v) => onUpdate({ followUpAction: v })}
++              ariaLabel="Follow-up action"
++              placeholder="e.g. 'Send governance angle note this week'"
++            />
++          </FormField>
++
++          <StepNav
++            onBack={() => setStep(1)}
++            onNext={null}
++            onCancel={onDone}
++            onDelete={handleDelete}
++            doneLabel="Done"
++          />
++        </div>
++      )}
++    </div>
++  );
++}
++
++// ---------- Sub-components ---------------------------------------------
++
++function FormField({
++  label,
++  helper,
++  children,
++}: {
++  label: string;
++  helper?: string;
++  children: React.ReactNode;
++}) {
++  return (
++    <div>
++      <div
++        style={{
++          fontSize: 13,
++          fontWeight: 600,
++          color: "var(--gh-ink)",
++          marginBottom: helper ? 4 : 8,
++        }}
++      >
++        {label}
++      </div>
++      {helper && (
++        <div
++          style={{
++            fontSize: 12.5,
++            color: "var(--gh-muted)",
++            lineHeight: 1.5,
++            marginBottom: 10,
++            maxWidth: 600,
++          }}
++        >
++          {helper}
++        </div>
++      )}
++      {children}
++    </div>
++  );
++}
++
++function ScoreField({
++  label,
++  helper,
++  value,
++  onChange,
++}: {
++  label: string;
++  helper: string;
++  value: number | undefined;
++  onChange: (v: number | undefined) => void;
++}) {
++  return (
++    <div
++      style={{
++        display: "grid",
++        gridTemplateColumns: "200px 1fr",
++        gap: 16,
++        alignItems: "center",
++      }}
++    >
++      <div>
++        <div
++          style={{
++            fontFamily: "var(--gh-mono)",
++            fontSize: 11,
++            color: "var(--gh-ink)",
++            textTransform: "uppercase",
++            letterSpacing: "0.06em",
++            fontWeight: 600,
++          }}
++        >
++          {label}
++        </div>
++        <div
++          style={{
++            fontSize: 11.5,
++            color: "var(--gh-faint)",
++            marginTop: 2,
++            lineHeight: 1.4,
++          }}
++        >
++          {helper}
++        </div>
++      </div>
++      <AutosaveScore value={value} onSave={onChange} ariaLabel={label} />
++    </div>
++  );
++}
++
++function StepNav({
++  onBack,
++  onNext,
++  onCancel,
++  onDelete,
++  doneLabel,
++}: {
++  onBack: (() => void) | null;
++  onNext: (() => void) | null;
++  onCancel?: () => void;
++  onDelete: () => void;
++  doneLabel?: string;
++}) {
++  return (
++    <div
++      style={{
++        display: "flex",
++        justifyContent: "space-between",
++        alignItems: "center",
++        paddingTop: 16,
++        borderTop: "1px solid var(--gh-line-soft)",
++        marginTop: 8,
++      }}
++    >
++      <Btn variant="ghost" sm onClick={onDelete}>
++        Delete
++      </Btn>
++      <div style={{ display: "flex", gap: 8 }}>
++        {onBack && (
++          <Btn sm onClick={onBack}>
++            ← Back
++          </Btn>
++        )}
++        {onCancel && (
++          <Btn sm onClick={onCancel}>
++            Save & close
++          </Btn>
++        )}
++        {onNext ? (
++          <Btn sm variant="primary" onClick={onNext}>
++            Continue →
++          </Btn>
++        ) : (
++          <Btn sm variant="primary" onClick={onCancel}>
++            {doneLabel ?? "Done"}
++          </Btn>
++        )}
++      </div>
++    </div>
++  );
++}
+--- a/src/components/ConversationCard.tsx
++++ b/src/components/ConversationCard.tsx
+@@ -0,0 +1,318 @@
++/* ==========================================================================
++   Growth Habitat — Conversation Card
++   One card per logged conversation. Shows the artifact: who, when, energy
++   gain as a chip, evidence strength, the key insight as a serif pull-quote
++   (if present), and the follow-up. Click to edit.
++   ========================================================================== */
++
++import { Eyebrow } from "./Primitives";
++import {
++  conversationEnergyGain,
++  conversationSignalAverage,
++} from "../lib/scoring";
++import { useDirections } from "../lib/store";
++import type { Conversation } from "../types/entities";
++
++const STRENGTH_LABEL = {
++  weak: "Weak",
++  medium: "Medium",
++  strong: "Strong",
++};
++
++const STRENGTH_TONE = {
++  weak: { bg: "var(--gh-canvas-deep)", fg: "var(--gh-faint)", border: "var(--gh-line)" },
++  medium: { bg: "var(--gh-mist)", fg: "var(--gh-slate-deep)", border: "var(--gh-mist-line)" },
++  strong: { bg: "var(--gh-rust-soft)", fg: "var(--gh-rust)", border: "var(--gh-rust-line)" },
++};
++
++export function ConversationCard({
++  conversation,
++  onClick,
++}: {
++  conversation: Conversation;
++  onClick: () => void;
++}) {
++  const { directions } = useDirections();
++  const direction = directions.find(
++    (d) => d.id === conversation.relatedDirectionId
++  );
++
++  const gain = conversationEnergyGain(conversation);
++  const sig = conversationSignalAverage(conversation);
++  const date = new Date(conversation.date);
++  const dateLabel = date.toLocaleDateString("en-GB", {
++    day: "numeric",
++    month: "short",
++    year: "numeric",
++  });
++  const cleanedNotes = (conversation.notes || "").replace(
++    /^\[market_pull:[^\]]*\]\s*/,
++    ""
++  );
++
++  const strengthTone = STRENGTH_TONE[conversation.evidenceStrength];
++
++  return (
++    <div
++      onClick={onClick}
++      style={{
++        background: "var(--gh-surface)",
++        border: "1px solid var(--gh-line)",
++        borderRadius: "var(--gh-r-panel)",
++        boxShadow: "var(--gh-shadow-card)",
++        padding: 24,
++        cursor: "pointer",
++        transition: "border-color var(--gh-dur-base) var(--gh-ease)",
++        marginBottom: 12,
++      }}
++      onMouseEnter={(e) => {
++        (e.currentTarget as HTMLElement).style.borderColor =
++          "var(--gh-faint)";
++      }}
++      onMouseLeave={(e) => {
++        (e.currentTarget as HTMLElement).style.borderColor = "var(--gh-line)";
++      }}
++    >
++      {/* Header row */}
++      <div
++        style={{
++          display: "grid",
++          gridTemplateColumns: "1fr auto",
++          gap: 16,
++          alignItems: "flex-start",
++          marginBottom: 12,
++        }}
++      >
++        <div style={{ minWidth: 0 }}>
++          <div
++            style={{
++              fontSize: 17,
++              fontWeight: 600,
++              color: "var(--gh-ink)",
++              letterSpacing: "-0.01em",
++              marginBottom: 4,
++            }}
++          >
++            {conversation.person || "(unnamed conversation)"}
++          </div>
++          <div
++            style={{
++              fontSize: 13,
++              color: "var(--gh-muted)",
++              lineHeight: 1.4,
++            }}
++          >
++            {[conversation.organization, conversation.role]
++              .filter(Boolean)
++              .join(" · ") || (
++              <span style={{ fontStyle: "italic" }}>No org or role yet</span>
++            )}
++          </div>
++        </div>
++
++        <div
++          style={{
++            display: "flex",
++            flexDirection: "column",
++            alignItems: "flex-end",
++            gap: 6,
++          }}
++        >
++          {/* Energy gain chip */}
++          {typeof gain === "number" ? (
++            <div
++              style={{
++                fontFamily: "var(--gh-mono)",
++                fontSize: 11,
++                fontWeight: 600,
++                padding: "3px 10px",
++                borderRadius: 999,
++                background:
++                  gain > 0
++                    ? "var(--gh-rust-soft)"
++                    : gain < 0
++                    ? "var(--gh-warn-soft)"
++                    : "var(--gh-canvas-deep)",
++                color:
++                  gain > 0
++                    ? "var(--gh-rust)"
++                    : gain < 0
++                    ? "var(--gh-warn)"
++                    : "var(--gh-muted)",
++                border: `1px solid ${
++                  gain > 0
++                    ? "var(--gh-rust-line)"
++                    : gain < 0
++                    ? "var(--gh-warn-line)"
++                    : "var(--gh-line)"
++                }`,
++              }}
++            >
++              {gain >= 0 ? `↗ +${gain}` : `↘ ${gain}`}
++            </div>
++          ) : (
++            <div
++              style={{
++                fontFamily: "var(--gh-mono)",
++                fontSize: 10.5,
++                color: "var(--gh-faint)",
++                textTransform: "uppercase",
++                letterSpacing: "0.06em",
++              }}
++            >
++              No energy yet
++            </div>
++          )}
++
++          {/* Evidence strength */}
++          <div
++            style={{
++              fontFamily: "var(--gh-mono)",
++              fontSize: 10,
++              padding: "2px 8px",
++              borderRadius: 999,
++              background: strengthTone.bg,
++              color: strengthTone.fg,
++              border: `1px solid ${strengthTone.border}`,
++              textTransform: "uppercase",
++              letterSpacing: "0.06em",
++              fontWeight: 500,
++            }}
++          >
++            {STRENGTH_LABEL[conversation.evidenceStrength]}
++          </div>
++        </div>
++      </div>
++
++      {/* Key insight as serif pull-quote (if present) */}
++      {conversation.keyInsight && (
++        <div
++          style={{
++            fontFamily: "var(--gh-italic)",
++            fontStyle: "italic",
++            fontSize: 15.5,
++            lineHeight: 1.45,
++            color: "var(--gh-ink)",
++            letterSpacing: "-0.005em",
++            paddingLeft: 14,
++            borderLeft: "2px solid var(--gh-rust-line)",
++            margin: "12px 0",
++          }}
++        >
++          "{conversation.keyInsight}"
++        </div>
++      )}
++
++      {/* Follow-up + meta */}
++      <div
++        style={{
++          display: "flex",
++          justifyContent: "space-between",
++          alignItems: "center",
++          marginTop: 16,
++          paddingTop: 12,
++          borderTop: "1px solid var(--gh-line-soft)",
++          gap: 16,
++        }}
++      >
++        <div
++          style={{
++            fontSize: 12.5,
++            color: conversation.followUpAction
++              ? "var(--gh-ink-soft)"
++              : "var(--gh-faint)",
++            lineHeight: 1.4,
++            flex: 1,
++            minWidth: 0,
++          }}
++        >
++          {conversation.followUpAction ? (
++            <>
++              <span
++                style={{
++                  fontFamily: "var(--gh-mono)",
++                  fontSize: 10.5,
++                  color: "var(--gh-faint)",
++                  textTransform: "uppercase",
++                  letterSpacing: "0.06em",
++                  marginRight: 8,
++                }}
++              >
++                Next:
++              </span>
++              {conversation.followUpAction}
++            </>
++          ) : (
++            <span style={{ fontStyle: "italic" }}>No follow-up yet</span>
++          )}
++        </div>
++        <div
++          style={{
++            display: "flex",
++            gap: 12,
++            alignItems: "center",
++            flexShrink: 0,
++          }}
++        >
++          {direction && (
++            <span
++              style={{
++                fontFamily: "var(--gh-mono)",
++                fontSize: 10.5,
++                color: "var(--gh-faint)",
++                textTransform: "uppercase",
++                letterSpacing: "0.06em",
++              }}
++            >
++              {direction.name}
++            </span>
++          )}
++          <span
++            style={{
++              fontFamily: "var(--gh-mono)",
++              fontSize: 10.5,
++              color: "var(--gh-faint)",
++              textTransform: "uppercase",
++              letterSpacing: "0.06em",
++            }}
++          >
++            {dateLabel}
++          </span>
++          {typeof sig === "number" && (
++            <span
++              style={{
++                fontFamily: "var(--gh-mono)",
++                fontSize: 11,
++                color: "var(--gh-ink)",
++              }}
++              title="Average Buffett-lens score"
++            >
++              {sig.toFixed(1)}
++            </span>
++          )}
++        </div>
++      </div>
++
++      {/* Notes preview if no key insight */}
++      {!conversation.keyInsight && cleanedNotes && (
++        <div
++          style={{
++            marginTop: 12,
++            paddingTop: 12,
++            borderTop: "1px dashed var(--gh-line-soft)",
++            fontSize: 12.5,
++            color: "var(--gh-muted)",
++            lineHeight: 1.5,
++            display: "-webkit-box",
++            WebkitLineClamp: 2,
++            WebkitBoxOrient: "vertical",
++            overflow: "hidden",
++          }}
++        >
++          <Eyebrow>Notes</Eyebrow>
++          <div style={{ marginTop: 4 }}>{cleanedNotes}</div>
++        </div>
++      )}
++    </div>
++  );
++}
+--- a/src/pages/Conversations.tsx
++++ b/src/pages/Conversations.tsx
+@@ -0,0 +1,105 @@
++/* ==========================================================================
++   Growth Habitat — Conversations Page
++   List of logged conversations + entry point for adding new ones. Sorted
++   most-recent-first. Card list, not table — each conversation is an
++   artifact, not a row in a database.
++   ========================================================================== */
++
++import { useNavigate } from "react-router-dom";
++import { ConversationCard } from "../components/ConversationCard";
++import { Btn, Card, SectionHeader } from "../components/Primitives";
++import { Page } from "../components/Shell";
++import { useConversations } from "../lib/store";
++
++export default function ConversationsPage() {
++  const { conversations, add } = useConversations();
++  const navigate = useNavigate();
++
++  const handleAdd = () => {
++    const created = add({
++      person: "",
++      organization: "",
++      role: "",
++      relatedDirectionId: undefined,
++      date: new Date().toISOString().slice(0, 10),
++      energyBefore: undefined,
++      energyAfter: undefined,
++      admirationScore: undefined,
++      learningPotentialScore: undefined,
++      recognitionScore: undefined,
++      autonomyScore: undefined,
++      marketPullScore: undefined,
++      trustSignal: undefined,
++      evidenceStrength: "medium",
++      taggedEnergyGains: [],
++      taggedEnergyDrains: [],
++      workWithOnHardProblem: undefined,
++      keyInsight: "",
++      notes: "",
++      followUpAction: "",
++    });
++    navigate(`/conversations/${created.id}`);
++  };
++
++  // Most recent first
++  const sorted = [...conversations].sort((a, b) =>
++    b.date.localeCompare(a.date)
++  );
++
++  return (
++    <Page
++      crumbs={["Career discovery", "Talks"]}
++      actions={
++        <Btn sm variant="primary" onClick={handleAdd}>
++          + Log conversation
++        </Btn>
++      }
++    >
++      <SectionHeader
++        eyebrow="03 · Talks"
++        title="Use real conversations to test where your value is recognized."
++        subtitle="Each conversation is a small experiment. Log within 24 hours — memory edits the data."
++      />
++
++      {sorted.length === 0 ? (
++        <Card style={{ padding: 48, textAlign: "center" }}>
++          <p
++            style={{
++              fontSize: 16,
++              color: "var(--gh-ink-soft)",
++              marginBottom: 8,
++              fontWeight: 500,
++            }}
++          >
++            Conversations are experiments.
++          </p>
++          <p
++            style={{
++              fontSize: 14,
++              color: "var(--gh-muted)",
++              maxWidth: 420,
++              margin: "0 auto 24px",
++              lineHeight: 1.55,
++            }}
++          >
++            Log them within 24 hours — memory edits the data. Patterns appear
++            after 5–10 conversations. Until then, this page is patient.
++          </p>
++          <Btn variant="primary" onClick={handleAdd}>
++            Log your first conversation
++          </Btn>
++        </Card>
++      ) : (
++        <div>
++          {sorted.map((conv) => (
++            <ConversationCard
++              key={conv.id}
++              conversation={conv}
++              onClick={() => navigate(`/conversations/${conv.id}`)}
++            />
++          ))}
++        </div>
++      )}
++    </Page>
++  );
++}
+--- a/src/pages/Conversation.tsx
++++ b/src/pages/Conversation.tsx
+@@ -0,0 +1,84 @@
++/* ==========================================================================
++   Growth Habitat — Conversation Editor Page
++   Wraps the multi-step ConversationForm in a Page shell. Edits a single
++   conversation by ID from the route param.
++   ========================================================================== */
++
++import { useNavigate, useParams } from "react-router-dom";
++import { ConversationForm } from "../components/ConversationForm";
++import { Btn, Card, SectionHeader } from "../components/Primitives";
++import { Page } from "../components/Shell";
++import { useConversations, useStore } from "../lib/store";
++
++export default function ConversationPage() {
++  const { id } = useParams<{ id: string }>();
++  const navigate = useNavigate();
++  const { conversations } = useConversations();
++  const { saving } = useStore();
++
++  const conv = conversations.find((c) => c.id === id);
++
++  if (!conv) {
++    return (
++      <Page crumbs={["Career discovery", "Talks", "Not found"]}>
++        <SectionHeader
++          eyebrow="Talks"
++          title="Conversation not found"
++          subtitle="It may have been deleted, or the link may be stale."
++        />
++        <Card>
++          <Btn onClick={() => navigate("/conversations")}>
++            ← Back to all talks
++          </Btn>
++        </Card>
++      </Page>
++    );
++  }
++
++  const personLabel = conv.person || "Untitled conversation";
++  const dateLabel = new Date(conv.date).toLocaleDateString("en-GB", {
++    day: "numeric",
++    month: "short",
++    year: "numeric",
++  });
++
++  return (
++    <Page
++      crumbs={["Career discovery", "Talks", personLabel]}
++      actions={
++        <span
++          style={{
++            fontFamily: "var(--gh-mono)",
++            fontSize: 11,
++            color: saving ? "var(--gh-rust)" : "var(--gh-faint)",
++            letterSpacing: "0.06em",
++            textTransform: "uppercase",
++          }}
++        >
++          {saving ? "Saving…" : "Saved"}
++        </span>
++      }
++    >
++      <SectionHeader
++        eyebrow={`Talk · ${dateLabel}`}
++        title={personLabel}
++        subtitle={
++          [conv.organization, conv.role].filter(Boolean).join(" · ") ||
++          "Add the basic context in step 1 — everything else autosaves as you go."
++        }
++        action={
++          <Btn sm onClick={() => navigate("/conversations")}>
++            ← All talks
++          </Btn>
++        }
++      />
++
++      <Card style={{ padding: 32 }}>
++        <ConversationForm
++          conversationId={conv.id}
++          onDone={() => navigate("/conversations")}
++        />
++      </Card>
++    </Page>
++  );
++}
