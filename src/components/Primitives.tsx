@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 // ---------- Eyebrow ----------
@@ -458,5 +459,262 @@ export function MistLandscape({
         );
       })}
     </svg>
+  );
+}
+
+// ==========================================================================
+// Autosave-on-blur input primitives
+// ==========================================================================
+
+export function AutosaveInput({
+  value,
+  onSave,
+  placeholder,
+  ariaLabel,
+  style,
+}: {
+  value: string;
+  onSave: (next: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  style?: CSSProperties;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => setLocal(value), [value]);
+  return (
+    <input
+      className="gh-input"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        if (local !== value) onSave(local);
+      }}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      style={style}
+    />
+  );
+}
+
+export function AutosaveTextarea({
+  value,
+  onSave,
+  placeholder,
+  ariaLabel,
+  rows = 3,
+  style,
+}: {
+  value: string;
+  onSave: (next: string) => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  rows?: number;
+  style?: CSSProperties;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => setLocal(value), [value]);
+  return (
+    <textarea
+      className="gh-textarea"
+      value={local}
+      rows={rows}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        if (local !== value) onSave(local);
+      }}
+      placeholder={placeholder}
+      aria-label={ariaLabel}
+      style={style}
+    />
+  );
+}
+
+export function AutosaveList({
+  values,
+  onSave,
+  placeholder,
+}: {
+  values: string[];
+  onSave: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const [local, setLocal] = useState<string[]>(values);
+  useEffect(() => setLocal(values), [values]);
+
+  const commit = (next: string[]) => {
+    const cleaned = next.map((s) => s.trim()).filter((s) => s.length > 0);
+    if (JSON.stringify(cleaned) !== JSON.stringify(values)) {
+      onSave(cleaned);
+    }
+  };
+
+  const updateAt = (i: number, val: string) => {
+    setLocal((prev) => {
+      const next = [...prev];
+      next[i] = val;
+      return next;
+    });
+  };
+
+  const removeAt = (i: number) => {
+    const next = local.filter((_, idx) => idx !== i);
+    setLocal(next);
+    commit(next);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {local.map((v, i) => (
+        <div
+          key={i}
+          style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
+        >
+          <textarea
+            className="gh-textarea"
+            value={v}
+            rows={1}
+            placeholder={placeholder}
+            onChange={(e) => updateAt(i, e.target.value)}
+            onBlur={() => commit(local)}
+            style={{ minHeight: 38, padding: "8px 10px", flex: 1 }}
+          />
+          <button
+            type="button"
+            onClick={() => removeAt(i)}
+            aria-label="Remove"
+            style={{
+              width: 30,
+              height: 30,
+              marginTop: 4,
+              border: "1px solid var(--gh-line)",
+              borderRadius: "var(--gh-r-control)",
+              background: "var(--gh-canvas)",
+              color: "var(--gh-faint)",
+              fontSize: 14,
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => setLocal((prev) => [...prev, ""])}
+        style={{
+          alignSelf: "flex-start",
+          height: 30,
+          padding: "0 12px",
+          border: "1px dashed var(--gh-line)",
+          borderRadius: "var(--gh-r-control)",
+          background: "transparent",
+          color: "var(--gh-muted)",
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: "pointer",
+        }}
+      >
+        + Add
+      </button>
+    </div>
+  );
+}
+
+export function AutosaveScore({
+  value,
+  onSave,
+  ariaLabel,
+}: {
+  value: number | undefined;
+  onSave: (next: number | undefined) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      style={{ display: "flex", alignItems: "center", gap: 10 }}
+      role="group"
+      aria-label={ariaLabel}
+    >
+      <div className="gh-score-rail" style={{ flex: 1 }}>
+        {Array.from({ length: 10 }, (_, i) => {
+          const n = i + 1;
+          const on = typeof value === "number" && n <= value;
+          return (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onSave(value === n ? undefined : n)}
+              aria-label={`Set to ${n}`}
+              className={`gh-score-seg ${on ? "is-on" : ""}`.trim()}
+              style={{ cursor: "pointer", border: "none", padding: 0, height: 14 }}
+            />
+          );
+        })}
+      </div>
+      <span
+        style={{
+          fontFamily: "var(--gh-mono)",
+          fontSize: 12,
+          color: typeof value === "number" ? "var(--gh-ink)" : "var(--gh-faint)",
+          width: 28,
+          textAlign: "right",
+        }}
+      >
+        {typeof value === "number" ? value : "—"}
+      </span>
+    </div>
+  );
+}
+
+export function StatusPill<T extends string>({
+  value,
+  options,
+  onChange,
+  toneFor,
+}: {
+  value: T;
+  options: T[];
+  onChange: (next: T) => void;
+  toneFor: (v: T) => "rust" | "slate" | "default" | "muted";
+}) {
+  const next = () => {
+    const idx = options.indexOf(value);
+    onChange(options[(idx + 1) % options.length]);
+  };
+  const tone = toneFor(value);
+  const palette =
+    tone === "rust"
+      ? { bg: "var(--gh-rust-soft)", fg: "var(--gh-rust)", border: "var(--gh-rust-line)" }
+      : tone === "slate"
+      ? { bg: "var(--gh-slate-soft)", fg: "var(--gh-slate-deep)", border: "var(--gh-slate-line)" }
+      : tone === "muted"
+      ? { bg: "var(--gh-canvas-deep)", fg: "var(--gh-faint)", border: "var(--gh-line)" }
+      : { bg: "var(--gh-surface)", fg: "var(--gh-ink)", border: "var(--gh-line)" };
+
+  return (
+    <button
+      type="button"
+      onClick={next}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        height: 24,
+        padding: "0 10px",
+        border: `1px solid ${palette.border}`,
+        borderRadius: 999,
+        background: palette.bg,
+        color: palette.fg,
+        fontFamily: "var(--gh-mono)",
+        fontSize: 11,
+        fontWeight: 500,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        cursor: "pointer",
+      }}
+    >
+      {value}
+    </button>
   );
 }

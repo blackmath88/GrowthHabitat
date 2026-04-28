@@ -1,0 +1,2966 @@
+From: Growth Habitat build assistant
+Subject: [PATCH] Data layer + live Profile and Directions pages
+
+The app stops being a mockup. Profile and Directions are now fully editable
+with autosave-on-blur. The Command Center pulls live data from the store
+instead of hard-coded constants. Twelve files: 4 modified, 7 new, 1 config.
+
+What's new
+----------
+
+src/types/entities.ts — TypeScript types for every entity in the app.
+Profile, Direction, Conversation, Opportunity, Hypothesis, Reflection,
+Pattern, plus the AppData top-level shape. Adds:
+  - evidenceStrength: "weak" | "medium" | "strong" on Conversation and Opportunity
+  - trustSignal: "forming" | "not_enough_signal" | "concern" on Conversation
+  - taggedEnergyGains/taggedEnergyDrains: string[] on Conversation
+    (data hooks for cross-page Profile-as-measurement-reference)
+  - workWithOnHardProblem: yes/no/maybe on Conversation (the "would I
+    work with them on a hard problem next month" check)
+  - Hypothesis with confidence (1-10) and isCurrent flag for versioning
+
+src/lib/seed.ts — Achim's actual seed content, faithfully transcribed:
+ten strengths in his words, five energy gains, five drains, three
+non-negotiables, five thrive environments, three avoid environments,
+seven directions with hypotheses and initial scores, one current
+hypothesis at confidence 5.
+
+src/lib/scoring.ts — Pure functions. directionAverage, conversationEnergyGain,
+conversationSignalAverage, opportunityFitScore, weightedEvidenceCount
+(weak=1, medium=2, strong=4), countByStrength, rankDirections,
+strongestDirection, rankConversationsByEnergyGain, bestRecentConversation,
+commandStats. No state, no side effects.
+
+src/lib/storage.ts — Single-key localStorage adapter with migration support.
+load(), save(), reset(), exportJSON(), importJSON(), downloadJSON(). The
+SCHEMA_VERSION constant is what enables future format changes without
+losing data. Swap this one file for a Cloudflare Workers + D1 client
+later, no other file changes.
+
+src/lib/store.tsx — React context wrapping the storage layer. StoreProvider
+plus hooks: useStore, useProfile, useDirections, useConversations,
+useOpportunities, useCurrentHypothesis. Autosave runs on every mutation
+with a 200ms debounce so a burst of edits batches into one save. Quiet
+saved-indicator state available via the saving flag.
+
+src/pages/Profile.tsx — Full editing surface. Eleven sections: working
+identity, positioning, current/desired, strengths, working style, energy
+gains, energy drains, thrive environments, avoid environments, non-
+negotiables. Each section uses AutosaveInput / AutosaveTextarea /
+AutosaveList — commits happen on blur. Quiet saved indicator in the topbar.
+
+src/pages/Directions.tsx — Full editing surface for the seven directions.
+Each direction is a collapsible card with: name (autosave), status pill
+(click to cycle through active/explore/park/avoid), score row (7
+dimensions, click-to-set 1-10), description, hypothesis, notes. Cards
+are ordered by averageScore descending; avoided directions appear in a
+separate group at the bottom. Add via prompt, delete with confirm.
+Includes inline DecisionLegend defining pursue/explore/park/avoid.
+
+What's modified
+---------------
+
+src/components/Primitives.tsx — Adds AutosaveInput, AutosaveTextarea,
+AutosaveList, AutosaveScore, StatusPill primitives. Existing components
+unchanged.
+
+src/App.tsx — Wraps everything in StoreProvider. The AppShell now reads
+profile.name, profile.currentHypothesis, and conversation count from the
+live store instead of hard-coded constants.
+
+src/pages/CommandCenter.tsx — Connected to live store data. Strongest
+direction, best recent conversation, watch-out, stats band, and "next
+step" suggestion all derive from real entities. Discovery phase landscape
+auto-detects which phase Achim is in based on what data exists. The
+auto-suggested next step shows its basis ("Why: this direction scores
+8.1 but has 0 conversations logged"). When a tile has no data to show,
+it renders a helpful empty state instead of fake content.
+
+src/pages/StubPage.tsx — No functional change, just confirmed unchanged.
+
+tsconfig.json — Bumps target/lib from ES2020 to ES2022 to enable Array.at()
+which the hypothesis history code uses.
+
+Apply with:
+    git apply 0003-data-layer-profile-directions.patch
+
+Or with plain patch:
+    patch -p1 < 0003-data-layer-profile-directions.patch
+
+Verify:
+    npm run build
+    npm run dev
+
+Then visit /, /profile, /directions and confirm:
+- Profile fields edit, blur, save quietly
+- Directions cards expand, scores click to set, status cycles
+- Command Center reflects your edits in real time
+
+---
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,73 +1,84 @@
+ import { Routes, Route } from "react-router-dom";
+ import { AppShell } from "./components/Shell";
+ import CommandCenter from "./pages/CommandCenter";
++import ProfilePage from "./pages/Profile";
++import DirectionsPage from "./pages/Directions";
+ import { StubPage } from "./pages/StubPage";
++import { StoreProvider, useProfile, useConversations } from "./lib/store";
+ 
+-const HYPOTHESIS_SHORT =
+-  "AI workforce adoption inside governance-aware orgs.";
+-const HYPOTHESIS_META = "v1 · 5 talks";
++// Inner shell that reads live data from the store. Has to live inside the
++// provider so the hooks work.
++function ShellWithLiveData({ children }: { children: React.ReactNode }) {
++  const { profile } = useProfile();
++  const { conversations } = useConversations();
++
++  // Trim the hypothesis sentence for the sidebar — full sentence is too long
++  // for the narrow column. Take the first ~50 chars and clean the cut.
++  const trimmed =
++    profile.currentHypothesis.length > 60
++      ? profile.currentHypothesis.slice(0, 60).replace(/[\s,.;:]+\S*$/, "") +
++        "…"
++      : profile.currentHypothesis;
++
++  // Derive initials from the profile name (max 2 chars)
++  const initials = profile.name
++    .split(/\s+/)
++    .map((w) => w[0]?.toUpperCase() ?? "")
++    .slice(0, 2)
++    .join("");
+ 
+-export default function App() {
+   return (
+     <AppShell
+-      ownerName="Achim Imboden"
+-      ownerInitials="AI"
+-      hypothesisShort={HYPOTHESIS_SHORT}
+-      hypothesisMeta={HYPOTHESIS_META}
++      ownerName={profile.name}
++      ownerInitials={initials}
++      hypothesisShort={trimmed}
++      hypothesisMeta={`v1 · ${conversations.length} talks`}
+     >
+-      <Routes>
+-        <Route path="/" element={<CommandCenter />} />
+-        <Route
+-          path="/profile"
+-          element={
+-            <StubPage
+-              num="01"
+-              title="Profile"
+-              subtitle="Capture what you know about yourself before testing the market."
+-            />
+-          }
+-        />
+-        <Route
+-          path="/directions"
+-          element={
+-            <StubPage
+-              num="02"
+-              title="Directions"
+-              subtitle="Compare possible career paths before committing to one."
+-            />
+-          }
+-        />
+-        <Route
+-          path="/conversations"
+-          element={
+-            <StubPage
+-              num="03"
+-              title="Talks"
+-              subtitle="Use real conversations to test where your value is recognized."
+-            />
+-          }
+-        />
+-        <Route
+-          path="/opportunities"
+-          element={
+-            <StubPage
+-              num="04"
+-              title="Roles"
+-              subtitle="Decide whether a role, company, or project deserves attention."
+-            />
+-          }
+-        />
+-        <Route
+-          path="/patterns"
+-          element={
+-            <StubPage
+-              num="05"
+-              title="Patterns"
+-              subtitle="Review the evidence and decide what to test next."
+-            />
+-          }
+-        />
+-      </Routes>
++      {children}
+     </AppShell>
+   );
+ }
++
++export default function App() {
++  return (
++    <StoreProvider>
++      <ShellWithLiveData>
++        <Routes>
++          <Route path="/" element={<CommandCenter />} />
++          <Route path="/profile" element={<ProfilePage />} />
++          <Route path="/directions" element={<DirectionsPage />} />
++          <Route
++            path="/conversations"
++            element={
++              <StubPage
++                num="03"
++                title="Talks"
++                subtitle="Use real conversations to test where your value is recognized."
++              />
++            }
++          />
++          <Route
++            path="/opportunities"
++            element={
++              <StubPage
++                num="04"
++                title="Roles"
++                subtitle="Decide whether a role, company, or project deserves attention."
++              />
++            }
++          />
++          <Route
++            path="/patterns"
++            element={
++              <StubPage
++                num="05"
++                title="Patterns"
++                subtitle="Review the evidence and decide what to test next."
++              />
++            }
++          />
++        </Routes>
++      </ShellWithLiveData>
++    </StoreProvider>
++  );
++}
+--- a/src/components/Primitives.tsx
++++ b/src/components/Primitives.tsx
+@@ -1,3 +1,4 @@
++import { useEffect, useState } from "react";
+ import type { CSSProperties, ReactNode } from "react";
+ 
+ // ---------- Eyebrow ----------
+@@ -461,4 +462,292 @@
+   );
+ }
+ 
++// ==========================================================================
++// Autosave-on-blur input primitives
++// ==========================================================================
++
++/**
++ * Text input with local state that commits to onSave only when the user
++ * blurs the field. Quiet, reliable, no on-keystroke jitter.
++ */
++export function AutosaveInput({
++  value,
++  onSave,
++  placeholder,
++  ariaLabel,
++  style,
++}: {
++  value: string;
++  onSave: (next: string) => void;
++  placeholder?: string;
++  ariaLabel?: string;
++  style?: CSSProperties;
++}) {
++  const [local, setLocal] = useState(value);
++  // Sync external changes (e.g. import, reset) into local state.
++  useEffect(() => setLocal(value), [value]);
++  return (
++    <input
++      className="gh-input"
++      value={local}
++      onChange={(e) => setLocal(e.target.value)}
++      onBlur={() => {
++        if (local !== value) onSave(local);
++      }}
++      placeholder={placeholder}
++      aria-label={ariaLabel}
++      style={style}
++    />
++  );
++}
++
++/** Same pattern, multi-line. */
++export function AutosaveTextarea({
++  value,
++  onSave,
++  placeholder,
++  ariaLabel,
++  rows = 3,
++  style,
++}: {
++  value: string;
++  onSave: (next: string) => void;
++  placeholder?: string;
++  ariaLabel?: string;
++  rows?: number;
++  style?: CSSProperties;
++}) {
++  const [local, setLocal] = useState(value);
++  useEffect(() => setLocal(value), [value]);
++  return (
++    <textarea
++      className="gh-textarea"
++      value={local}
++      rows={rows}
++      onChange={(e) => setLocal(e.target.value)}
++      onBlur={() => {
++        if (local !== value) onSave(local);
++      }}
++      placeholder={placeholder}
++      aria-label={ariaLabel}
++      style={style}
++    />
++  );
++}
++
++/**
++ * Edit a string array as a list of separate inputs. Each row commits
++ * independently on blur. Plus button at the bottom appends. Empty rows
++ * are dropped on commit so the data stays clean.
++ */
++export function AutosaveList({
++  values,
++  onSave,
++  placeholder,
++}: {
++  values: string[];
++  onSave: (next: string[]) => void;
++  placeholder?: string;
++}) {
++  const [local, setLocal] = useState<string[]>(values);
++  useEffect(() => setLocal(values), [values]);
++
++  const commit = (next: string[]) => {
++    const cleaned = next.map((s) => s.trim()).filter((s) => s.length > 0);
++    // Only persist if it actually changed compared to the saved values.
++    if (JSON.stringify(cleaned) !== JSON.stringify(values)) {
++      onSave(cleaned);
++    }
++  };
++
++  const updateAt = (i: number, val: string) => {
++    setLocal((prev) => {
++      const next = [...prev];
++      next[i] = val;
++      return next;
++    });
++  };
++
++  const removeAt = (i: number) => {
++    const next = local.filter((_, idx) => idx !== i);
++    setLocal(next);
++    commit(next);
++  };
++
++  const append = () => {
++    setLocal((prev) => [...prev, ""]);
++  };
++
++  return (
++    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
++      {local.map((v, i) => (
++        <div
++          key={i}
++          style={{
++            display: "flex",
++            gap: 8,
++            alignItems: "flex-start",
++          }}
++        >
++          <textarea
++            className="gh-textarea"
++            value={v}
++            rows={1}
++            placeholder={placeholder}
++            onChange={(e) => updateAt(i, e.target.value)}
++            onBlur={() => commit(local)}
++            style={{ minHeight: 38, padding: "8px 10px", flex: 1 }}
++          />
++          <button
++            type="button"
++            onClick={() => removeAt(i)}
++            aria-label="Remove"
++            style={{
++              width: 30,
++              height: 30,
++              marginTop: 4,
++              border: "1px solid var(--gh-line)",
++              borderRadius: "var(--gh-r-control)",
++              background: "var(--gh-canvas)",
++              color: "var(--gh-faint)",
++              fontSize: 14,
++              cursor: "pointer",
++              flexShrink: 0,
++            }}
++          >
++            ×
++          </button>
++        </div>
++      ))}
++      <button
++        type="button"
++        onClick={append}
++        style={{
++          alignSelf: "flex-start",
++          height: 30,
++          padding: "0 12px",
++          border: "1px dashed var(--gh-line)",
++          borderRadius: "var(--gh-r-control)",
++          background: "transparent",
++          color: "var(--gh-muted)",
++          fontSize: 12,
++          fontWeight: 500,
++          cursor: "pointer",
++        }}
++      >
++        + Add
++      </button>
++    </div>
++  );
++}
++
++/**
++ * Score editor for the 1–10 scale. Renders as a row of 10 segments.
++ * Click a segment to set the score. Click the same one again to clear.
++ */
++export function AutosaveScore({
++  value,
++  onSave,
++  ariaLabel,
++}: {
++  value: number | undefined;
++  onSave: (next: number | undefined) => void;
++  ariaLabel?: string;
++}) {
++  return (
++    <div
++      style={{ display: "flex", alignItems: "center", gap: 10 }}
++      role="group"
++      aria-label={ariaLabel}
++    >
++      <div className="gh-score-rail" style={{ flex: 1 }}>
++        {Array.from({ length: 10 }, (_, i) => {
++          const n = i + 1;
++          const on = typeof value === "number" && n <= value;
++          return (
++            <button
++              key={n}
++              type="button"
++              onClick={() => onSave(value === n ? undefined : n)}
++              aria-label={`Set to ${n}`}
++              className={`gh-score-seg ${on ? "is-on" : ""}`.trim()}
++              style={{
++                cursor: "pointer",
++                border: "none",
++                padding: 0,
++                height: 14,
++              }}
++            />
++          );
++        })}
++      </div>
++      <span
++        style={{
++          fontFamily: "var(--gh-mono)",
++          fontSize: 12,
++          color: typeof value === "number" ? "var(--gh-ink)" : "var(--gh-faint)",
++          width: 28,
++          textAlign: "right",
++        }}
++      >
++        {typeof value === "number" ? value : "—"}
++      </span>
++    </div>
++  );
++}
++
++/**
++ * Status pill with click-to-cycle. Shows the current status, clicking
++ * cycles to the next one in the provided order.
++ */
++export function StatusPill<T extends string>({
++  value,
++  options,
++  onChange,
++  toneFor,
++}: {
++  value: T;
++  options: T[];
++  onChange: (next: T) => void;
++  toneFor: (v: T) => "rust" | "slate" | "default" | "muted";
++}) {
++  const next = () => {
++    const idx = options.indexOf(value);
++    onChange(options[(idx + 1) % options.length]);
++  };
++  const tone = toneFor(value);
++  const palette =
++    tone === "rust"
++      ? { bg: "var(--gh-rust-soft)", fg: "var(--gh-rust)", border: "var(--gh-rust-line)" }
++      : tone === "slate"
++      ? { bg: "var(--gh-slate-soft)", fg: "var(--gh-slate-deep)", border: "var(--gh-slate-line)" }
++      : tone === "muted"
++      ? { bg: "var(--gh-canvas-deep)", fg: "var(--gh-faint)", border: "var(--gh-line)" }
++      : { bg: "var(--gh-surface)", fg: "var(--gh-ink)", border: "var(--gh-line)" };
+ 
++  return (
++    <button
++      type="button"
++      onClick={next}
++      style={{
++        display: "inline-flex",
++        alignItems: "center",
++        gap: 6,
++        height: 24,
++        padding: "0 10px",
++        border: `1px solid ${palette.border}`,
++        borderRadius: 999,
++        background: palette.bg,
++        color: palette.fg,
++        fontFamily: "var(--gh-mono)",
++        fontSize: 11,
++        fontWeight: 500,
++        letterSpacing: "0.06em",
++        textTransform: "uppercase",
++        cursor: "pointer",
++      }}
++    >
++      {value}
++    </button>
++  );
++}
+--- a/src/pages/CommandCenter.tsx
++++ b/src/pages/CommandCenter.tsx
+@@ -9,56 +9,142 @@
+   Tile,
+ } from "../components/Primitives";
+ import { Page } from "../components/Shell";
++import {
++  bestRecentConversation,
++  commandStats,
++  conversationEnergyGain,
++  directionAverage,
++  strongestDirection,
++} from "../lib/scoring";
++import {
++  useConversations,
++  useCurrentHypothesis,
++  useDirections,
++  useOpportunities,
++  useProfile,
++} from "../lib/store";
++
++// ---------- Discovery phase logic ----------------------------------------
++// Inferred from data, not stored. The phase Achim is "in" is determined by
++// what data has accumulated.
++
++function computePhase(
++  hasProfile: boolean,
++  directionCount: number,
++  conversationCount: number,
++  hasPatterns: boolean
++): { steps: string[]; activeIndex: number; label: string; sub: string } {
++  const steps = ["Profile", "Directions", "Talks", "Patterns"];
++  if (!hasProfile) {
++    return {
++      steps,
++      activeIndex: 0,
++      label: "Drafting profile",
++      sub: "Write what you know about yourself before testing the market.",
++    };
++  }
++  if (directionCount < 3) {
++    return {
++      steps,
++      activeIndex: 1,
++      label: "Mapping directions",
++      sub: "Run several hypotheses in parallel. Don't commit yet.",
++    };
++  }
++  if (conversationCount < 5) {
++    return {
++      steps,
++      activeIndex: 2,
++      label: "Collecting evidence",
++      sub: `${conversationCount} of about 5–10 conversations needed before patterns emerge.`,
++    };
++  }
++  if (!hasPatterns) {
++    return {
++      steps,
++      activeIndex: 3,
++      label: "Reading the patterns",
++      sub: "Enough evidence to look for concentration, absence, and contradiction.",
++    };
++  }
++  return {
++    steps,
++    activeIndex: 3,
++    label: "Refining hypothesis",
++    sub: "The hypothesis evolves. Confidence rises with evidence.",
++  };
++}
+ 
+-// ---------- Hard-coded preview content ----------
+-// Will be replaced by live data from the storage layer in the next pass.
+-
+-const HYPOTHESIS_FULL =
+-  "AI workforce adoption inside governance-aware organizations is where my translator, activator, and structured creativity strengths compound fastest over the next 3 years.";
+-
+-const STATS = {
+-  conversations30d: 5,
+-  activeDirections: 5,
+-  totalDirections: 7,
+-  avgEnergyGain: "+2.4",
+-  strongestFit: "9.0",
+-};
+-
+-const STRONGEST_DIRECTION = {
+-  name: "AI Adoption Consulting",
+-  averageScore: 8.4,
+-  description: "Combines change, governance, and practical AI enablement.",
+-  topScore: "9.0 strengths fit",
+-};
+-
+-const BEST_CONVERSATION = {
+-  org: "Microsoft Partner",
+-  role: "Head of Modern Work",
+-  energyGain: 3,
+-  insight:
+-    "The market gap they described — Copilot rolled out without governance — is exactly the work I do.",
+-  followUp: "Send governance angle note · this week",
+-};
+-
+-const NEXT_STEP = {
+-  title: "Three short outreach notes to AI adoption leads",
+-  description: "One concrete action this week.",
+-  due: "Fri 1 May",
+-};
+-
+-const WATCH_OUT =
+-  "Two recent conversations had high admiration but low market pull — energizing, but no immediate signal.";
+-
+-const PHASE_STEPS = ["Profile", "Directions", "Talks", "Patterns"];
+-const PHASE_ACTIVE = 1; // Currently working on Directions
++// ---------- Page ---------------------------------------------------------
+ 
+-// ---------- Page ----------
+ export default function CommandCenter() {
++  const { profile } = useProfile();
++  const { directions } = useDirections();
++  const { conversations } = useConversations();
++  const { opportunities } = useOpportunities();
++  const { current: hyp } = useCurrentHypothesis();
++
++  const stats = commandStats(directions, conversations);
++  const strongest = strongestDirection(directions);
++  const bestConv = bestRecentConversation(conversations);
++
+   const today = new Date().toLocaleDateString("en-GB", {
+     day: "numeric",
+     month: "short",
+   });
+ 
++  const phase = computePhase(
++    profile.workingIdentity.length > 0,
++    directions.length,
++    conversations.length,
++    false // patterns auto-detection comes in a later patch
++  );
++
++  // ---------- Strongest-direction tile content -------------------------
++  const strongestAvg = strongest ? directionAverage(strongest) : undefined;
++  const strongestTopScore = strongest
++    ? (() => {
++        const dims: { label: string; value: number | undefined }[] = [
++          { label: "Strengths fit", value: strongest.strengthsFitScore },
++          { label: "Interest", value: strongest.interestScore },
++          { label: "Market demand", value: strongest.marketDemandScore },
++          { label: "Learning", value: strongest.learningPotentialScore },
++          { label: "Access", value: strongest.accessScore },
++          { label: "Credibility", value: strongest.credibilityScore },
++          { label: "Comp potential", value: strongest.compensationPotentialScore },
++        ];
++        const sorted = dims
++          .filter((d) => typeof d.value === "number")
++          .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
++        const top = sorted[0];
++        return top ? `${top.value} ${top.label.toLowerCase()}` : "—";
++      })()
++    : undefined;
++
++  // ---------- Best conversation gain -----------------------------------
++  const bestGain = bestConv ? conversationEnergyGain(bestConv) : undefined;
++
++  // ---------- Watch-out logic ------------------------------------------
++  // Simple v1: detect "high score, low evidence" — directions ranked high
++  // but never tested via conversation.
++  const watchOut = (() => {
++    const ranked = directions
++      .filter((d) => d.status === "active" || d.status === "explore")
++      .filter((d) => directionAverage(d) !== undefined)
++      .sort(
++        (a, b) =>
++          (directionAverage(b) ?? 0) - (directionAverage(a) ?? 0)
++      );
++    const untested = ranked.find(
++      (d) => !conversations.some((c) => c.relatedDirectionId === d.id)
++    );
++    if (untested) {
++      const avg = directionAverage(untested);
++      return `${untested.name} scores ${avg?.toFixed(1)} on hypothesis but has no conversations yet. The score is wishful until evidence arrives.`;
++    }
++    return null;
++  })();
++
+   return (
+     <Page
+       crumbs={["Career discovery", "Home"]}
+@@ -85,7 +171,6 @@
+             minHeight: 360,
+           }}
+         >
+-          {/* Left: editorial headline */}
+           <div
+             style={{
+               padding: "44px 48px",
+@@ -95,7 +180,12 @@
+             }}
+           >
+             <Eyebrow style={{ marginBottom: 16 }}>
+-              Working hypothesis · v1 · {today}
++              Working hypothesis · v
++              {/* simple version display: count of hypotheses */}
++              {/* full version history lives on Patterns */}
++              {1}
++              {" · "}
++              {today}
+             </Eyebrow>
+             <h1
+               style={{
+@@ -129,15 +219,29 @@
+                 marginBottom: 28,
+               }}
+             >
+-              {HYPOTHESIS_FULL}
++              {hyp?.statement ?? profile.currentHypothesis}
+             </p>
+-            <div style={{ display: "flex", gap: 10 }}>
++            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+               <Btn variant="primary">Review evidence →</Btn>
+               <Btn>Update hypothesis</Btn>
++              {hyp && (
++                <span
++                  style={{
++                    marginLeft: 8,
++                    fontFamily: "var(--gh-mono)",
++                    fontSize: 11,
++                    color: "var(--gh-faint)",
++                    textTransform: "uppercase",
++                    letterSpacing: "0.06em",
++                  }}
++                >
++                  Confidence{" "}
++                  {typeof hyp.confidence === "number" ? hyp.confidence : "—"}/10
++                </span>
++              )}
+             </div>
+           </div>
+ 
+-          {/* Right: mist landscape */}
+           <div
+             style={{
+               background: "var(--gh-mist)",
+@@ -157,21 +261,24 @@
+                   letterSpacing: "-0.015em",
+                 }}
+               >
+-                Comparing directions
++                {phase.label}
+               </div>
+               <div
+                 style={{
+                   marginTop: 4,
+                   fontSize: 12.5,
+                   color: "var(--gh-muted)",
++                  lineHeight: 1.5,
+                 }}
+               >
+-                Profile drafted. Now stress-testing seven directions against real
+-                conversations.
++                {phase.sub}
+               </div>
+             </div>
+             <div style={{ flex: 1, marginTop: 8 }}>
+-              <MistLandscape steps={PHASE_STEPS} activeIndex={PHASE_ACTIVE} />
++              <MistLandscape
++                steps={phase.steps}
++                activeIndex={phase.activeIndex}
++              />
+             </div>
+           </div>
+         </Card>
+@@ -191,73 +298,158 @@
+             gap: 16,
+           }}
+         >
+-          <Tile
+-            tone="rust"
+-            eyebrow="Strongest direction · pursue"
+-            badge={
+-              <span
+-                style={{
+-                  fontFamily: "var(--gh-mono)",
+-                  fontSize: 11,
+-                  padding: "3px 10px",
+-                  background: "rgba(245,244,241,0.15)",
+-                  borderRadius: 999,
+-                  color: "var(--gh-canvas)",
+-                }}
+-              >
+-                {STRONGEST_DIRECTION.averageScore.toFixed(1)}
+-              </span>
+-            }
+-            title={STRONGEST_DIRECTION.name}
+-            body={STRONGEST_DIRECTION.description}
+-            footer={
+-              <>
+-                <span>{STRONGEST_DIRECTION.topScore}</span>
+-                <span style={{ opacity: 0.7 }}>→</span>
+-              </>
+-            }
+-          />
++          {/* Strongest direction tile */}
++          {strongest ? (
++            <Tile
++              tone="rust"
++              eyebrow="Strongest direction · pursue"
++              badge={
++                strongestAvg !== undefined && (
++                  <span
++                    style={{
++                      fontFamily: "var(--gh-mono)",
++                      fontSize: 11,
++                      padding: "3px 10px",
++                      background: "rgba(245,244,241,0.15)",
++                      borderRadius: 999,
++                      color: "var(--gh-canvas)",
++                    }}
++                  >
++                    {strongestAvg.toFixed(1)}
++                  </span>
++                )
++              }
++              title={strongest.name}
++              body={strongest.description || strongest.hypothesis}
++              footer={
++                strongestTopScore ? (
++                  <>
++                    <span>{strongestTopScore}</span>
++                    <span style={{ opacity: 0.7 }}>→</span>
++                  </>
++                ) : (
++                  <span style={{ opacity: 0.7 }}>Score this direction →</span>
++                )
++              }
++            />
++          ) : (
++            <Tile
++              tone="mist"
++              eyebrow="Strongest direction · empty"
++              title="No directions scored yet"
++              body="Score at least one direction on Directions to see it surface here."
++            />
++          )}
+ 
+-          <Tile
+-            tone="slate"
+-            eyebrow="Best conversation · reflect"
+-            badge={
+-              <span
+-                style={{
+-                  fontFamily: "var(--gh-mono)",
+-                  fontSize: 11,
+-                  padding: "3px 10px",
+-                  background: "rgba(245,244,241,0.15)",
+-                  borderRadius: 999,
+-                  color: "var(--gh-canvas)",
+-                }}
+-              >
+-                ↗ +{BEST_CONVERSATION.energyGain}
+-              </span>
+-            }
+-            meta={`${BEST_CONVERSATION.org} · ${BEST_CONVERSATION.role}`}
+-            title={BEST_CONVERSATION.insight}
+-            italic
+-            footer={
+-              <>
+-                <span>{BEST_CONVERSATION.followUp}</span>
+-                <span style={{ opacity: 0.7 }}>→</span>
+-              </>
+-            }
+-          />
++          {/* Best conversation tile */}
++          {bestConv ? (
++            <Tile
++              tone="slate"
++              eyebrow="Best conversation · reflect"
++              badge={
++                typeof bestGain === "number" && (
++                  <span
++                    style={{
++                      fontFamily: "var(--gh-mono)",
++                      fontSize: 11,
++                      padding: "3px 10px",
++                      background: "rgba(245,244,241,0.15)",
++                      borderRadius: 999,
++                      color: "var(--gh-canvas)",
++                    }}
++                  >
++                    {bestGain >= 0 ? `↗ +${bestGain}` : `↘ ${bestGain}`}
++                  </span>
++                )
++              }
++              meta={`${bestConv.organization} · ${bestConv.role}`}
++              title={bestConv.keyInsight || bestConv.notes || "—"}
++              italic={!!bestConv.keyInsight}
++              footer={
++                <>
++                  <span>{bestConv.followUpAction || "No follow-up yet"}</span>
++                  <span style={{ opacity: 0.7 }}>→</span>
++                </>
++              }
++            />
++          ) : (
++            <Tile
++              tone="mist"
++              eyebrow="Best conversation · empty"
++              title="No conversations logged yet"
++              body="Conversations are experiments. Log them within 24 hours — memory edits the data."
++            />
++          )}
+ 
++          {/* Next step tile */}
+           <Tile
+-            tone="mist"
++            tone={opportunities.length > 0 ? "mist" : "mist"}
+             eyebrow="Next step · observe"
+             badge={
+-              <Chip tone="neutral">Due {NEXT_STEP.due}</Chip>
++              <Chip tone="neutral">
++                {opportunities.length === 0 ? "Suggested" : "From data"}
++              </Chip>
++            }
++            title={
++              conversations.length === 0
++                ? "Log one conversation this week"
++                : (() => {
++                    // Suggest: a direction with highest score but zero conversations
++                    const ranked = directions
++                      .filter(
++                        (d) => d.status === "active" || d.status === "explore"
++                      )
++                      .filter((d) => directionAverage(d) !== undefined)
++                      .sort(
++                        (a, b) =>
++                          (directionAverage(b) ?? 0) -
++                          (directionAverage(a) ?? 0)
++                      );
++                    const untested = ranked.find(
++                      (d) =>
++                        !conversations.some(
++                          (c) => c.relatedDirectionId === d.id
++                        )
++                    );
++                    if (untested) {
++                      return `Book one conversation in ${untested.name}`;
++                    }
++                    return "Review patterns and update the hypothesis";
++                  })()
++            }
++            body={
++              conversations.length === 0
++                ? "Why: no evidence yet — the app is patient until then."
++                : (() => {
++                    const ranked = directions
++                      .filter(
++                        (d) => d.status === "active" || d.status === "explore"
++                      )
++                      .filter((d) => directionAverage(d) !== undefined)
++                      .sort(
++                        (a, b) =>
++                          (directionAverage(b) ?? 0) -
++                          (directionAverage(a) ?? 0)
++                      );
++                    const untested = ranked.find(
++                      (d) =>
++                        !conversations.some(
++                          (c) => c.relatedDirectionId === d.id
++                        )
++                    );
++                    if (untested) {
++                      const avg = directionAverage(untested);
++                      return `Why: this direction scores ${avg?.toFixed(
++                        1
++                      )} but has 0 conversations logged.`;
++                    }
++                    return "Why: every active direction has at least one data point.";
++                  })()
+             }
+-            title={NEXT_STEP.title}
+-            body={NEXT_STEP.description}
+             footer={
+               <div style={{ display: "flex", gap: 6 }}>
+                 <Btn sm variant="dark">Mark complete</Btn>
+-                <Btn sm>Reschedule</Btn>
++                <Btn sm>Edit suggestion</Btn>
+               </div>
+             }
+           />
+@@ -277,7 +469,7 @@
+           <div style={{ paddingRight: 24 }}>
+             <Stat
+               label="Conversations · 30d"
+-              value={String(STATS.conversations30d)}
++              value={String(stats.conversations30d)}
+             />
+           </div>
+           <div
+@@ -288,7 +480,7 @@
+           >
+             <Stat
+               label="Active directions"
+-              value={`${STATS.activeDirections}/${STATS.totalDirections}`}
++              value={`${stats.activeDirections}/${stats.totalDirections}`}
+             />
+           </div>
+           <div
+@@ -299,8 +491,12 @@
+           >
+             <Stat
+               label="Avg energy gain"
+-              value={STATS.avgEnergyGain}
+-              emphasis
++              value={
++                typeof stats.avgEnergyGain === "number"
++                  ? `${stats.avgEnergyGain >= 0 ? "+" : ""}${stats.avgEnergyGain}`
++                  : "—"
++              }
++              emphasis={typeof stats.avgEnergyGain === "number"}
+             />
+           </div>
+           <div
+@@ -309,96 +505,105 @@
+               padding: "0 24px",
+             }}
+           >
+-            <Stat label="Strongest fit" value={STATS.strongestFit} />
++            <Stat
++              label="Strongest fit"
++              value={
++                typeof stats.strongestFit === "number"
++                  ? stats.strongestFit.toFixed(1)
++                  : "—"
++              }
++            />
+           </div>
+         </Card>
+       </section>
+ 
+       {/* ====================  CLOSING WATCH-OUT  ==================== */}
+-      <section>
+-        <div
+-          style={{
+-            background: "var(--gh-slate)",
+-            color: "var(--gh-canvas)",
+-            borderRadius: 16,
+-            padding: "28px 32px",
+-            display: "flex",
+-            alignItems: "center",
+-            gap: 24,
+-          }}
+-        >
++      {watchOut && (
++        <section>
+           <div
+             style={{
+-              width: 44,
+-              height: 44,
+-              borderRadius: 999,
+-              background: "rgba(245,244,241,0.12)",
+-              display: "grid",
+-              placeItems: "center",
+-              flexShrink: 0,
++              background: "var(--gh-slate)",
++              color: "var(--gh-canvas)",
++              borderRadius: 16,
++              padding: "28px 32px",
++              display: "flex",
++              alignItems: "center",
++              gap: 24,
+             }}
+           >
+-            <svg
+-              width="20"
+-              height="20"
+-              viewBox="0 0 24 24"
+-              fill="none"
+-              stroke="var(--gh-canvas)"
+-              strokeWidth="1.6"
+-              strokeLinecap="round"
+-              strokeLinejoin="round"
+-              opacity="0.85"
+-            >
+-              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+-              <line x1="12" y1="9" x2="12" y2="13" />
+-              <line x1="12" y1="17" x2="12.01" y2="17" />
+-            </svg>
+-          </div>
+-          <div style={{ flex: 1 }}>
+             <div
+               style={{
+-                fontFamily: "var(--gh-mono)",
+-                fontSize: 11,
+-                color: "rgba(245,244,241,0.65)",
+-                textTransform: "uppercase",
+-                letterSpacing: "0.08em",
+-                fontWeight: 500,
+-                marginBottom: 8,
++                width: 44,
++                height: 44,
++                borderRadius: 999,
++                background: "rgba(245,244,241,0.12)",
++                display: "grid",
++                placeItems: "center",
++                flexShrink: 0,
+               }}
+             >
+-              Watch-out · drawn from your evidence
++              <svg
++                width="20"
++                height="20"
++                viewBox="0 0 24 24"
++                fill="none"
++                stroke="var(--gh-canvas)"
++                strokeWidth="1.6"
++                strokeLinecap="round"
++                strokeLinejoin="round"
++                opacity="0.85"
++              >
++                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
++                <line x1="12" y1="9" x2="12" y2="13" />
++                <line x1="12" y1="17" x2="12.01" y2="17" />
++              </svg>
+             </div>
+-            <div
++            <div style={{ flex: 1 }}>
++              <div
++                style={{
++                  fontFamily: "var(--gh-mono)",
++                  fontSize: 11,
++                  color: "rgba(245,244,241,0.65)",
++                  textTransform: "uppercase",
++                  letterSpacing: "0.08em",
++                  fontWeight: 500,
++                  marginBottom: 8,
++                }}
++              >
++                Watch-out · drawn from your evidence
++              </div>
++              <div
++                style={{
++                  fontFamily: "var(--gh-italic)",
++                  fontStyle: "italic",
++                  fontSize: 17,
++                  lineHeight: 1.45,
++                  fontWeight: 400,
++                  letterSpacing: "-0.005em",
++                }}
++              >
++                "{watchOut}"
++              </div>
++            </div>
++            <button
+               style={{
+-                fontFamily: "var(--gh-italic)",
+-                fontStyle: "italic",
+-                fontSize: 17,
+-                lineHeight: 1.45,
+-                fontWeight: 400,
+-                letterSpacing: "-0.005em",
++                height: 32,
++                padding: "0 14px",
++                borderRadius: 8,
++                background: "rgba(245,244,241,0.12)",
++                color: "var(--gh-canvas)",
++                border: "1px solid rgba(245,244,241,0.22)",
++                fontSize: 12,
++                fontWeight: 500,
++                cursor: "pointer",
++                flexShrink: 0,
+               }}
+             >
+-              "{WATCH_OUT}"
+-            </div>
++              Review patterns
++            </button>
+           </div>
+-          <button
+-            style={{
+-              height: 32,
+-              padding: "0 14px",
+-              borderRadius: 8,
+-              background: "rgba(245,244,241,0.12)",
+-              color: "var(--gh-canvas)",
+-              border: "1px solid rgba(245,244,241,0.22)",
+-              fontSize: 12,
+-              fontWeight: 500,
+-              cursor: "pointer",
+-              flexShrink: 0,
+-            }}
+-          >
+-            Review patterns
+-          </button>
+-        </div>
+-      </section>
++        </section>
++      )}
+     </Page>
+   );
+ }
+--- a/src/lib/seed.ts
++++ b/src/lib/seed.ts
+@@ -0,0 +1,240 @@
++/* ==========================================================================
++   Growth Habitat — Seed Data
++   Initial state when the app starts fresh or after a reset. Achim-specific
++   content, written in his voice. Edit freely after first run.
++   ========================================================================== */
++
++import type { AppData, Direction } from "../types/entities";
++import { SCHEMA_VERSION } from "../types/entities";
++
++const NOW = "2026-04-26T00:00:00.000Z";
++
++// ---------- Helper to make IDs deterministic in seed ----------------------
++
++const seedId = (prefix: string, n: number) => `${prefix}_${String(n).padStart(2, "0")}`;
++
++// ---------- Directions ----------------------------------------------------
++
++const directions: Direction[] = [
++  {
++    id: seedId("dir", 1),
++    name: "AI Adoption Consulting",
++    description:
++      "Help governance-aware organizations turn AI from possibility into real workforce usage. Combines change, people, governance, and practical enablement.",
++    hypothesis:
++      "This direction may fit because it combines change, people, governance, AI readiness, and practical enablement — all my existing strengths converging.",
++    status: "active",
++    interestScore: 9,
++    marketDemandScore: 8,
++    strengthsFitScore: 9,
++    learningPotentialScore: 8,
++    accessScore: 7,
++    credibilityScore: 7,
++    compensationPotentialScore: 7,
++    notes: "",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++  {
++    id: seedId("dir", 2),
++    name: "Microsoft Partner Ecosystem",
++    description:
++      "Roles inside or adjacent to Microsoft's partner network — M365/Copilot adoption, governance-aware deployment, modern work transformation.",
++    hypothesis:
++      "This direction may fit because I already understand M365/Copilot adoption and the governance challenges around Microsoft environments.",
++    status: "active",
++    interestScore: 8,
++    marketDemandScore: 9,
++    strengthsFitScore: 8,
++    learningPotentialScore: 7,
++    accessScore: 7,
++    credibilityScore: 8,
++    compensationPotentialScore: 8,
++    notes: "",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++  {
++    id: seedId("dir", 3),
++    name: "Public Sector AI Transformation",
++    description:
++      "AI adoption work inside government, public administration, or quasi-public bodies where governance, compliance, and trust are central.",
++    hypothesis:
++      "This direction may fit because governance, compliance, adoption, and trust are central — and I already work in a public-sector-adjacent context.",
++    status: "active",
++    interestScore: 7,
++    marketDemandScore: 7,
++    strengthsFitScore: 8,
++    learningPotentialScore: 7,
++    accessScore: 6,
++    credibilityScore: 7,
++    compensationPotentialScore: 6,
++    notes: "",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++  {
++    id: seedId("dir", 4),
++    name: "Corporate AI Enablement",
++    description:
++      "In-house AI enablement role at a larger company — building workforce capability, governance frameworks, and adoption programs.",
++    hypothesis:
++      "This direction may fit if the role gives enough autonomy and strategic influence rather than narrow execution.",
++    status: "explore",
++    interestScore: 7,
++    marketDemandScore: 8,
++    strengthsFitScore: 8,
++    learningPotentialScore: 7,
++    accessScore: 7,
++    credibilityScore: 7,
++    compensationPotentialScore: 8,
++    notes: "",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++  {
++    id: seedId("dir", 5),
++    name: "Boutique Innovation Consultancy",
++    description:
++      "Small consultancy environment with smart people, fast pace, and room for creative structuring across change, AI, and human-centered design.",
++    hypothesis:
++      "This direction may fit if the environment is smart, fast, human, and gives room for creative structuring rather than process maintenance.",
++    status: "explore",
++    interestScore: 8,
++    marketDemandScore: 6,
++    strengthsFitScore: 9,
++    learningPotentialScore: 9,
++    accessScore: 5,
++    credibilityScore: 6,
++    compensationPotentialScore: 7,
++    notes: "",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++  {
++    id: seedId("dir", 6),
++    name: "Education / Research AI Transformation",
++    description:
++      "AI transformation work inside higher education, research institutions, or learning-focused organizations.",
++    hypothesis:
++      "This direction may fit because I understand higher education and research-adjacent public-sector dynamics from inside.",
++    status: "active",
++    interestScore: 7,
++    marketDemandScore: 6,
++    strengthsFitScore: 8,
++    learningPotentialScore: 7,
++    accessScore: 8,
++    credibilityScore: 8,
++    compensationPotentialScore: 5,
++    notes: "",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++  {
++    id: seedId("dir", 7),
++    name: "Independent Consulting / Productized Offer",
++    description:
++      "Self-employed consulting or a productized offer around AI adoption, change, and governance.",
++    hypothesis:
++      "This direction may fit as a long-term option but conflicts with the near-term non-negotiable of a secure base.",
++    status: "park",
++    interestScore: 7,
++    marketDemandScore: 6,
++    strengthsFitScore: 8,
++    learningPotentialScore: 8,
++    accessScore: 4,
++    credibilityScore: 6,
++    compensationPotentialScore: 6,
++    notes:
++      "Parked for now. Conflicts with non-negotiable: I need a secure enough base.",
++    createdAt: NOW,
++    updatedAt: NOW,
++  },
++];
++
++// ---------- Initial hypothesis -------------------------------------------
++
++const hypothesis = {
++  id: seedId("hyp", 1),
++  statement:
++    "I am testing whether AI workforce adoption inside governance-aware organizations is where my translator, activator, and structured creativity strengths compound fastest over the next 3 years.",
++  confidence: 5 as number,
++  evidenceFor: "",
++  evidenceAgainst: "",
++  nextStep: "",
++  isCurrent: true,
++  createdAt: NOW,
++  updatedAt: NOW,
++};
++
++// ---------- Full seed payload --------------------------------------------
++
++export const SEED: AppData = {
++  schemaVersion: SCHEMA_VERSION,
++  profile: {
++    id: "profile",
++    name: "Achim Imboden",
++    currentRole:
++      "Senior Expert Change Management / M365 Adoption, University of Basel",
++    desiredDirection:
++      "AI adoption, AI transformation, workforce AI enablement, governance-aware Copilot/M365 transformation, practical AI readiness",
++    workingIdentity:
++      "AI Workforce Adoption Architect · Cross-Pollinator · Structured Creative Translator",
++    positioningStatement:
++      "I help governance-aware organizations turn AI from possibility into real usage by bridging people, M365/Copilot adoption, governance, and practical workforce enablement.",
++    strengths: [
++      "I can sense quite early where people are emotionally, what they are afraid of, and what would help them move.",
++      "I connect topics that usually stay separated: AI, change, governance, tools, people, learning, design, and communication.",
++      "I can turn messy complexity into a structure, map, framework, or interface that people can actually use.",
++      "I bring energy into rooms when a topic feels stuck, abstract, or heavy.",
++      "I am good at translating technical possibilities into human language without making them shallow.",
++      "I see adoption problems before they become rollout problems.",
++      "I can create formats that make people curious instead of defensive.",
++      "I learn fast by building, testing, comparing, and talking things through.",
++      "I am good at spotting individual strengths and helping people find their own way into a topic.",
++      "I can make serious organizational work feel more alive, creative, and approachable.",
++    ],
++    workingStyle:
++      "Structured-creative. I move between strategy and prototype quickly. I learn by building and conversing. I prefer small smart teams over large slow ones.",
++    energyGains: [
++      "Smart people working on messy, meaningful problems without pretending the answer is already clear.",
++      "Conversations where technical depth meets plain language and practical use.",
++      "Situations where I can design a structure, framework, tool, or workshop that helps people move.",
++      "Environments where AI is treated as an organizational capability, not just a software feature.",
++      "Moments where people suddenly understand something complex because the framing or interface makes it visible.",
++    ],
++    energyDrains: [
++      "Long meetings without a clear question, decision, or owner.",
++      "Rigid hierarchy where people protect roles instead of solving the actual problem.",
++      "AI hype without governance, adoption thinking, or real user value.",
++      "Work where I only execute predefined tasks and cannot shape the approach.",
++      "Environments where everything must look polished before anything is allowed to be tested.",
++    ],
++    thriveEnvironments: [
++      "Governance-aware organizations that genuinely need to make AI usable for real people.",
++      "Small or mid-sized teams with smart people, trust, speed, and room to build.",
++      "Settings where strategy and implementation are close together, so ideas can become artifacts quickly.",
++      "Organizations dealing with ambiguity, change, and adoption rather than only technical deployment.",
++      "Communities or networks where learning, experimentation, and shared ownership matter.",
++    ],
++    avoidEnvironments: [
++      "Purely political environments where self-protection matters more than progress.",
++      "Narrow execution roles where my job is mainly to maintain processes, coordinate tasks, or produce status updates.",
++      "Generic AI hype environments that sell transformation but do not care about governance, users, or long-term capability.",
++    ],
++    nonNegotiables: [
++      "I need a secure enough base: stable employment or a clearly sustainable setup, not pure financial uncertainty.",
++      "I need room to shape the work, not only deliver someone else's checklist.",
++      "The work has to stretch me toward AI adoption, transformation, governance, or human-centered technology — not pull me back into generic coordination.",
++    ],
++    currentHypothesis: hypothesis.statement,
++    updatedAt: NOW,
++  },
++  directions,
++  conversations: [],
++  opportunities: [],
++  hypotheses: [hypothesis],
++  reflections: [],
++  patterns: [],
++  updatedAt: NOW,
++};
+--- a/src/lib/scoring.ts
++++ b/src/lib/scoring.ts
+@@ -0,0 +1,207 @@
++/* ==========================================================================
++   Growth Habitat — Scoring
++   Pure functions. No state, no side effects. Given an entity, return a
++   computed value. These are the heart of "evidence becomes pattern."
++   ========================================================================== */
++
++import type {
++  Conversation,
++  Direction,
++  EvidenceStrength,
++  Opportunity,
++} from "../types/entities";
++
++// ---------- Helpers ------------------------------------------------------
++
++/** Round to 1 decimal place. Avoids float artifacts in display. */
++const round1 = (n: number) => Math.round(n * 10) / 10;
++
++/** Average of defined scores; returns undefined if none are scored. */
++function avgScores(scores: (number | undefined)[]): number | undefined {
++  const valid = scores.filter((s): s is number => typeof s === "number");
++  if (valid.length === 0) return undefined;
++  const sum = valid.reduce((a, b) => a + b, 0);
++  return round1(sum / valid.length);
++}
++
++// ---------- Direction.averageScore ---------------------------------------
++
++export function directionAverage(d: Direction): number | undefined {
++  return avgScores([
++    d.interestScore,
++    d.marketDemandScore,
++    d.strengthsFitScore,
++    d.learningPotentialScore,
++    d.accessScore,
++    d.credibilityScore,
++    d.compensationPotentialScore,
++  ]);
++}
++
++/** Number of scored dimensions (0–7). Useful for "how complete is this?" */
++export function directionScoreCompleteness(d: Direction): number {
++  return [
++    d.interestScore,
++    d.marketDemandScore,
++    d.strengthsFitScore,
++    d.learningPotentialScore,
++    d.accessScore,
++    d.credibilityScore,
++    d.compensationPotentialScore,
++  ].filter((s) => typeof s === "number").length;
++}
++
++// ---------- Conversation.energyGain --------------------------------------
++
++/**
++ * Energy gain = energy after - energy before. Positive = energizing.
++ * Returns undefined if either is unset, so the UI can show "—" instead of 0.
++ */
++export function conversationEnergyGain(c: Conversation): number | undefined {
++  if (typeof c.energyBefore !== "number" || typeof c.energyAfter !== "number") {
++    return undefined;
++  }
++  return c.energyAfter - c.energyBefore;
++}
++
++/** Average across the five "Buffett-lens" signal scores. */
++export function conversationSignalAverage(
++  c: Conversation
++): number | undefined {
++  return avgScores([
++    c.admirationScore,
++    c.learningPotentialScore,
++    c.recognitionScore,
++    c.autonomyScore,
++    c.marketPullScore,
++  ]);
++}
++
++// ---------- Opportunity.fitScore -----------------------------------------
++
++export function opportunityFitScore(o: Opportunity): number | undefined {
++  return avgScores([
++    o.interestingProblemsScore,
++    o.smartPeopleScore,
++    o.learningPotentialScore,
++    o.autonomyScore,
++    o.visibleImpactScore,
++    o.strengthsFitScore,
++    o.compensationScore,
++    o.futureValueScore,
++  ]);
++}
++
++// ---------- Evidence weighting -------------------------------------------
++
++/**
++ * Weight by evidence strength. Used in Patterns to make a "n=12" line honest:
++ * 12 weak data points isn't the same as 12 strong ones.
++ */
++export const EVIDENCE_WEIGHT: Record<EvidenceStrength, number> = {
++  weak: 1,
++  medium: 2,
++  strong: 4,
++};
++
++export function weightedEvidenceCount(items: {
++  evidenceStrength: EvidenceStrength;
++}[]): number {
++  return items.reduce((sum, item) => sum + EVIDENCE_WEIGHT[item.evidenceStrength], 0);
++}
++
++export function countByStrength(
++  items: { evidenceStrength: EvidenceStrength }[]
++): Record<EvidenceStrength, number> {
++  return items.reduce(
++    (acc, item) => {
++      acc[item.evidenceStrength] += 1;
++      return acc;
++    },
++    { weak: 0, medium: 0, strong: 0 } as Record<EvidenceStrength, number>
++  );
++}
++
++// ---------- Direction comparators ----------------------------------------
++
++/**
++ * Sort directions by average score, descending. Undefined averages sink.
++ */
++export function rankDirections(directions: Direction[]): Direction[] {
++  return [...directions]
++    .filter((d) => d.status !== "avoid")
++    .sort((a, b) => {
++      const av = directionAverage(a) ?? -1;
++      const bv = directionAverage(b) ?? -1;
++      return bv - av;
++    });
++}
++
++/** The single strongest direction, or undefined if none scored. */
++export function strongestDirection(
++  directions: Direction[]
++): Direction | undefined {
++  const ranked = rankDirections(directions);
++  return ranked.find((d) => directionAverage(d) !== undefined);
++}
++
++// ---------- Conversation comparators -------------------------------------
++
++export function rankConversationsByEnergyGain(
++  conversations: Conversation[]
++): Conversation[] {
++  return [...conversations]
++    .filter((c) => conversationEnergyGain(c) !== undefined)
++    .sort(
++      (a, b) =>
++        (conversationEnergyGain(b) ?? 0) - (conversationEnergyGain(a) ?? 0)
++    );
++}
++
++export function bestRecentConversation(
++  conversations: Conversation[]
++): Conversation | undefined {
++  // "Best recent" = highest energy gain in the last 30 days
++  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
++  const recent = conversations.filter(
++    (c) => new Date(c.date).getTime() >= cutoff
++  );
++  return rankConversationsByEnergyGain(recent)[0];
++}
++
++// ---------- Aggregate stats for the Command Center -----------------------
++
++export interface CommandStats {
++  conversations30d: number;
++  activeDirections: number;
++  totalDirections: number;
++  avgEnergyGain: number | undefined;
++  strongestFit: number | undefined;
++}
++
++export function commandStats(
++  directions: Direction[],
++  conversations: Conversation[]
++): CommandStats {
++  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
++  const recent = conversations.filter(
++    (c) => new Date(c.date).getTime() >= cutoff
++  );
++  const gains = recent
++    .map(conversationEnergyGain)
++    .filter((g): g is number => typeof g === "number");
++  const avgGain =
++    gains.length > 0
++      ? round1(gains.reduce((a, b) => a + b, 0) / gains.length)
++      : undefined;
++
++  const strongest = strongestDirection(directions);
++
++  return {
++    conversations30d: recent.length,
++    activeDirections: directions.filter((d) => d.status === "active").length,
++    totalDirections: directions.length,
++    avgEnergyGain: avgGain,
++    strongestFit: strongest ? directionAverage(strongest) : undefined,
++  };
++}
+--- a/src/lib/storage.ts
++++ b/src/lib/storage.ts
+@@ -0,0 +1,107 @@
++/* ==========================================================================
++   Growth Habitat — Storage
++   Single-key localStorage persistence behind a small interface. Swap this
++   one file for a Cloudflare Workers + D1 client later, no other file
++   changes. The interface is what other code depends on.
++   ========================================================================== */
++
++import type { AppData } from "../types/entities";
++import { SCHEMA_VERSION } from "../types/entities";
++import { SEED } from "./seed";
++
++const STORAGE_KEY = "growth_habitat_data";
++
++// ---------- Migration ----------------------------------------------------
++
++/**
++ * Migrate data from older schema versions to the current one. Add new
++ * versions as the schema evolves. The point is that old saves keep working.
++ */
++function migrate(raw: unknown): AppData {
++  if (!raw || typeof raw !== "object") {
++    return SEED;
++  }
++  const data = raw as Partial<AppData>;
++  if (data.schemaVersion === SCHEMA_VERSION && data.profile) {
++    return data as AppData;
++  }
++  // Future migrations land here as branches:
++  // if (data.schemaVersion === 1 && SCHEMA_VERSION === 2) { ... }
++  console.warn(
++    `[storage] Schema version mismatch (saved=${data.schemaVersion}, expected=${SCHEMA_VERSION}). Resetting to seed.`
++  );
++  return SEED;
++}
++
++// ---------- Public interface ---------------------------------------------
++
++export const storage = {
++  /** Load app data from localStorage. Returns seed if empty or corrupt. */
++  load(): AppData {
++    if (typeof window === "undefined") return SEED;
++    try {
++      const raw = window.localStorage.getItem(STORAGE_KEY);
++      if (!raw) return SEED;
++      const parsed = JSON.parse(raw);
++      return migrate(parsed);
++    } catch (err) {
++      console.error("[storage] Failed to load:", err);
++      return SEED;
++    }
++  },
++
++  /** Save app data. Stamps updatedAt. Quiet — no errors thrown to caller. */
++  save(data: AppData): void {
++    if (typeof window === "undefined") return;
++    try {
++      const stamped: AppData = {
++        ...data,
++        updatedAt: new Date().toISOString(),
++      };
++      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stamped));
++    } catch (err) {
++      console.error("[storage] Failed to save:", err);
++    }
++  },
++
++  /** Reset to seed data. Used by the "reset" action in settings. */
++  reset(): AppData {
++    if (typeof window === "undefined") return SEED;
++    try {
++      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED));
++    } catch (err) {
++      console.error("[storage] Failed to reset:", err);
++    }
++    return SEED;
++  },
++
++  /** Export current data as a JSON string for download. */
++  exportJSON(): string {
++    return JSON.stringify(this.load(), null, 2);
++  },
++
++  /**
++   * Import data from a JSON string. Validates schema before saving.
++   * Returns the parsed data on success, throws on failure.
++   */
++  importJSON(json: string): AppData {
++    const parsed = JSON.parse(json);
++    const migrated = migrate(parsed);
++    this.save(migrated);
++    return migrated;
++  },
++};
++
++// ---------- Convenience: download as file --------------------------------
++
++export function downloadJSON(filename = "growth-habitat-data.json"): void {
++  const blob = new Blob([storage.exportJSON()], { type: "application/json" });
++  const url = URL.createObjectURL(blob);
++  const a = document.createElement("a");
++  a.href = url;
++  a.download = filename;
++  document.body.appendChild(a);
++  a.click();
++  document.body.removeChild(a);
++  URL.revokeObjectURL(url);
++}
+--- a/src/lib/store.tsx
++++ b/src/lib/store.tsx
+@@ -0,0 +1,355 @@
++/* ==========================================================================
++   Growth Habitat — Store
++   React context wrapping the storage layer. Provides:
++     - useStore()           full data + setters
++     - useProfile()         profile + updater
++     - useDirections()      list + add/update/delete
++     - useConversations()   list + add/update/delete
++     - useOpportunities()   list + add/update/delete
++     - useCurrentHypothesis() current hypothesis + replace/version
++   Autosave runs on every mutation. There's no "save" button — the storage
++   layer is the source of truth, the React state mirrors it.
++   ========================================================================== */
++
++import {
++  createContext,
++  useCallback,
++  useContext,
++  useEffect,
++  useMemo,
++  useRef,
++  useState,
++} from "react";
++import type { ReactNode } from "react";
++import type {
++  AppData,
++  Conversation,
++  Direction,
++  Hypothesis,
++  Opportunity,
++  Profile,
++} from "../types/entities";
++import { storage } from "./storage";
++
++// ---------- Context ------------------------------------------------------
++
++interface StoreContextValue {
++  data: AppData;
++  setData: (next: AppData | ((prev: AppData) => AppData)) => void;
++  saving: boolean;
++  resetToSeed: () => void;
++  importData: (json: string) => void;
++}
++
++const StoreContext = createContext<StoreContextValue | null>(null);
++
++// ---------- Provider -----------------------------------------------------
++
++export function StoreProvider({ children }: { children: ReactNode }) {
++  const [data, setDataState] = useState<AppData>(() => storage.load());
++  const [saving, setSaving] = useState(false);
++  const saveTimer = useRef<number | null>(null);
++
++  const persist = useCallback((next: AppData) => {
++    setSaving(true);
++    if (saveTimer.current) window.clearTimeout(saveTimer.current);
++    // Tiny debounce so a burst of edits batches into one save.
++    saveTimer.current = window.setTimeout(() => {
++      storage.save(next);
++      setSaving(false);
++    }, 200);
++  }, []);
++
++  const setData = useCallback<StoreContextValue["setData"]>(
++    (updater) => {
++      setDataState((prev) => {
++        const next = typeof updater === "function" ? updater(prev) : updater;
++        persist(next);
++        return next;
++      });
++    },
++    [persist]
++  );
++
++  const resetToSeed = useCallback(() => {
++    const fresh = storage.reset();
++    setDataState(fresh);
++  }, []);
++
++  const importData = useCallback((json: string) => {
++    const imported = storage.importJSON(json);
++    setDataState(imported);
++  }, []);
++
++  // Cleanup pending save timer on unmount
++  useEffect(() => {
++    return () => {
++      if (saveTimer.current) window.clearTimeout(saveTimer.current);
++    };
++  }, []);
++
++  const value = useMemo<StoreContextValue>(
++    () => ({ data, setData, saving, resetToSeed, importData }),
++    [data, setData, saving, resetToSeed, importData]
++  );
++
++  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
++}
++
++// ---------- Base hook ---------------------------------------------------
++
++export function useStore(): StoreContextValue {
++  const ctx = useContext(StoreContext);
++  if (!ctx) {
++    throw new Error("useStore must be used inside <StoreProvider>");
++  }
++  return ctx;
++}
++
++// ---------- Profile hook ------------------------------------------------
++
++export function useProfile() {
++  const { data, setData } = useStore();
++
++  const update = useCallback(
++    (patch: Partial<Profile>) => {
++      setData((prev) => ({
++        ...prev,
++        profile: {
++          ...prev.profile,
++          ...patch,
++          updatedAt: new Date().toISOString(),
++        },
++      }));
++    },
++    [setData]
++  );
++
++  return { profile: data.profile, update };
++}
++
++// ---------- Directions hook ---------------------------------------------
++
++export function useDirections() {
++  const { data, setData } = useStore();
++
++  const add = useCallback(
++    (
++      direction: Omit<Direction, "id" | "createdAt" | "updatedAt">
++    ): Direction => {
++      const now = new Date().toISOString();
++      const created: Direction = {
++        ...direction,
++        id: `dir_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
++        createdAt: now,
++        updatedAt: now,
++      };
++      setData((prev) => ({ ...prev, directions: [...prev.directions, created] }));
++      return created;
++    },
++    [setData]
++  );
++
++  const update = useCallback(
++    (id: string, patch: Partial<Direction>) => {
++      setData((prev) => ({
++        ...prev,
++        directions: prev.directions.map((d) =>
++          d.id === id
++            ? { ...d, ...patch, updatedAt: new Date().toISOString() }
++            : d
++        ),
++      }));
++    },
++    [setData]
++  );
++
++  const remove = useCallback(
++    (id: string) => {
++      setData((prev) => ({
++        ...prev,
++        directions: prev.directions.filter((d) => d.id !== id),
++      }));
++    },
++    [setData]
++  );
++
++  return { directions: data.directions, add, update, remove };
++}
++
++// ---------- Conversations hook ------------------------------------------
++
++export function useConversations() {
++  const { data, setData } = useStore();
++
++  const add = useCallback(
++    (
++      conv: Omit<Conversation, "id" | "createdAt" | "updatedAt">
++    ): Conversation => {
++      const now = new Date().toISOString();
++      const created: Conversation = {
++        ...conv,
++        id: `conv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
++        createdAt: now,
++        updatedAt: now,
++      };
++      setData((prev) => ({
++        ...prev,
++        conversations: [...prev.conversations, created],
++      }));
++      return created;
++    },
++    [setData]
++  );
++
++  const update = useCallback(
++    (id: string, patch: Partial<Conversation>) => {
++      setData((prev) => ({
++        ...prev,
++        conversations: prev.conversations.map((c) =>
++          c.id === id
++            ? { ...c, ...patch, updatedAt: new Date().toISOString() }
++            : c
++        ),
++      }));
++    },
++    [setData]
++  );
++
++  const remove = useCallback(
++    (id: string) => {
++      setData((prev) => ({
++        ...prev,
++        conversations: prev.conversations.filter((c) => c.id !== id),
++      }));
++    },
++    [setData]
++  );
++
++  return { conversations: data.conversations, add, update, remove };
++}
++
++// ---------- Opportunities hook ------------------------------------------
++
++export function useOpportunities() {
++  const { data, setData } = useStore();
++
++  const add = useCallback(
++    (
++      opp: Omit<Opportunity, "id" | "createdAt" | "updatedAt">
++    ): Opportunity => {
++      const now = new Date().toISOString();
++      const created: Opportunity = {
++        ...opp,
++        id: `opp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
++        createdAt: now,
++        updatedAt: now,
++      };
++      setData((prev) => ({
++        ...prev,
++        opportunities: [...prev.opportunities, created],
++      }));
++      return created;
++    },
++    [setData]
++  );
++
++  const update = useCallback(
++    (id: string, patch: Partial<Opportunity>) => {
++      setData((prev) => ({
++        ...prev,
++        opportunities: prev.opportunities.map((o) =>
++          o.id === id
++            ? { ...o, ...patch, updatedAt: new Date().toISOString() }
++            : o
++        ),
++      }));
++    },
++    [setData]
++  );
++
++  const remove = useCallback(
++    (id: string) => {
++      setData((prev) => ({
++        ...prev,
++        opportunities: prev.opportunities.filter((o) => o.id !== id),
++      }));
++    },
++    [setData]
++  );
++
++  return { opportunities: data.opportunities, add, update, remove };
++}
++
++// ---------- Hypothesis hook ---------------------------------------------
++
++export function useCurrentHypothesis() {
++  const { data, setData } = useStore();
++
++  const current = useMemo<Hypothesis | undefined>(
++    () => data.hypotheses.find((h) => h.isCurrent) ?? data.hypotheses.at(-1),
++    [data.hypotheses]
++  );
++
++  /**
++   * Update the current hypothesis IN PLACE (no new version created).
++   * Use this for confidence tweaks and minor edits.
++   */
++  const updateCurrent = useCallback(
++    (patch: Partial<Hypothesis>) => {
++      setData((prev) => ({
++        ...prev,
++        hypotheses: prev.hypotheses.map((h) =>
++          h.isCurrent
++            ? { ...h, ...patch, updatedAt: new Date().toISOString() }
++            : h
++        ),
++      }));
++    },
++    [setData]
++  );
++
++  /**
++   * Replace the current hypothesis with a NEW version. Old version is
++   * archived (isCurrent: false). Use this when the statement itself changes.
++   */
++  const replaceWithNewVersion = useCallback(
++    (statement: string, confidence: number) => {
++      const now = new Date().toISOString();
++      setData((prev) => {
++        const archived = prev.hypotheses.map((h) => ({
++          ...h,
++          isCurrent: false,
++        }));
++        const next: Hypothesis = {
++          id: `hyp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
++          statement,
++          confidence,
++          evidenceFor: "",
++          evidenceAgainst: "",
++          nextStep: "",
++          isCurrent: true,
++          createdAt: now,
++          updatedAt: now,
++        };
++        return {
++          ...prev,
++          hypotheses: [...archived, next],
++          profile: {
++            ...prev.profile,
++            currentHypothesis: statement,
++            updatedAt: now,
++          },
++        };
++      });
++    },
++    [setData]
++  );
++
++  return {
++    current,
++    history: data.hypotheses,
++    updateCurrent,
++    replaceWithNewVersion,
++  };
++}
+--- a/src/pages/Profile.tsx
++++ b/src/pages/Profile.tsx
+@@ -0,0 +1,229 @@
++import {
++  AutosaveInput,
++  AutosaveList,
++  AutosaveTextarea,
++  Card,
++  Eyebrow,
++  SectionHeader,
++} from "../components/Primitives";
++import { Page } from "../components/Shell";
++import { useProfile, useStore } from "../lib/store";
++
++// ---------- Section card -------------------------------------------------
++
++function ProfileSection({
++  eyebrow,
++  title,
++  helper,
++  children,
++}: {
++  eyebrow: string;
++  title: string;
++  helper?: string;
++  children: React.ReactNode;
++}) {
++  return (
++    <Card style={{ padding: 28, marginBottom: 16 }}>
++      <Eyebrow>{eyebrow}</Eyebrow>
++      <h3
++        style={{
++          marginTop: 8,
++          fontSize: 20,
++          fontWeight: 600,
++          letterSpacing: "-0.015em",
++          color: "var(--gh-ink)",
++        }}
++      >
++        {title}
++      </h3>
++      {helper && (
++        <p
++          style={{
++            marginTop: 6,
++            fontSize: 13,
++            color: "var(--gh-muted)",
++            lineHeight: 1.55,
++            maxWidth: 640,
++          }}
++        >
++          {helper}
++        </p>
++      )}
++      <div style={{ marginTop: 16 }}>{children}</div>
++    </Card>
++  );
++}
++
++// ---------- Page ---------------------------------------------------------
++
++export default function ProfilePage() {
++  const { profile, update } = useProfile();
++  const { saving } = useStore();
++
++  return (
++    <Page
++      crumbs={["Career discovery", "Profile"]}
++      actions={
++        <span
++          style={{
++            fontFamily: "var(--gh-mono)",
++            fontSize: 11,
++            color: saving ? "var(--gh-rust)" : "var(--gh-faint)",
++            letterSpacing: "0.06em",
++            textTransform: "uppercase",
++          }}
++        >
++          {saving ? "Saving…" : "Saved"}
++        </span>
++      }
++    >
++      <SectionHeader
++        eyebrow="01 · Profile"
++        title="Capture what you know about yourself before testing the market."
++        subtitle="The Profile is the measurement reference. Every conversation, opportunity, and pattern in this app is judged against what you write here. Keep it honest, keep it specific, edit it freely."
++      />
++
++      <ProfileSection
++        eyebrow="Identity"
++        title="Working identity"
++        helper="The sentence you'd say to a smart friend if they asked who you actually are professionally. One line."
++      >
++        <AutosaveInput
++          value={profile.workingIdentity}
++          onSave={(v) => update({ workingIdentity: v })}
++          ariaLabel="Working identity"
++          placeholder="e.g. AI Workforce Adoption Architect · Cross-Pollinator"
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Identity"
++        title="Positioning statement"
++        helper="What you do, for whom, and how. Written so a stranger could repeat it back."
++      >
++        <AutosaveTextarea
++          rows={3}
++          value={profile.positioningStatement}
++          onSave={(v) => update({ positioningStatement: v })}
++          ariaLabel="Positioning statement"
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Context"
++        title="Current role & desired direction"
++        helper="Where you are now and where you're heading. Both rough is fine."
++      >
++        <div
++          style={{
++            display: "grid",
++            gridTemplateColumns: "1fr 1fr",
++            gap: 16,
++          }}
++        >
++          <div>
++            <Eyebrow style={{ marginBottom: 8 }}>Current role</Eyebrow>
++            <AutosaveInput
++              value={profile.currentRole}
++              onSave={(v) => update({ currentRole: v })}
++              ariaLabel="Current role"
++            />
++          </div>
++          <div>
++            <Eyebrow style={{ marginBottom: 8 }}>Desired direction</Eyebrow>
++            <AutosaveInput
++              value={profile.desiredDirection}
++              onSave={(v) => update({ desiredDirection: v })}
++              ariaLabel="Desired direction"
++            />
++          </div>
++        </div>
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="What I bring"
++        title="Strengths"
++        helper="In your own words, not framework labels. What you'd say if a friend asked. The act of pruning is itself useful — keep what's load-bearing, drop what's polite."
++      >
++        <AutosaveList
++          values={profile.strengths}
++          onSave={(v) => update({ strengths: v })}
++          placeholder="e.g. I see adoption problems before they become rollout problems."
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="What I bring"
++        title="Working style"
++        helper="How you actually work when you're in flow. One paragraph."
++      >
++        <AutosaveTextarea
++          rows={3}
++          value={profile.workingStyle}
++          onSave={(v) => update({ workingStyle: v })}
++          ariaLabel="Working style"
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Energy"
++        title="What gives me energy"
++        helper="Specific situations and conditions, not abstractions. These become tags on your conversations later — so write them concretely enough to recognize again."
++      >
++        <AutosaveList
++          values={profile.energyGains}
++          onSave={(v) => update({ energyGains: v })}
++          placeholder="e.g. Smart people working on messy, meaningful problems."
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Energy"
++        title="What drains my energy"
++        helper="The repeating patterns that leave you flat. Honesty here is what makes the conversation log honest later."
++      >
++        <AutosaveList
++          values={profile.energyDrains}
++          onSave={(v) => update({ energyDrains: v })}
++          placeholder="e.g. Long meetings without a clear question."
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Fit"
++        title="Environments where I thrive"
++        helper="The kinds of organizations, teams, or settings where you do your best work."
++      >
++        <AutosaveList
++          values={profile.thriveEnvironments}
++          onSave={(v) => update({ thriveEnvironments: v })}
++          placeholder="e.g. Small teams with smart people, trust, and room to build."
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Fit"
++        title="Environments to avoid"
++        helper="What you've learned the hard way to stay clear of."
++      >
++        <AutosaveList
++          values={profile.avoidEnvironments}
++          onSave={(v) => update({ avoidEnvironments: v })}
++          placeholder="e.g. Purely political environments where self-protection matters more than progress."
++        />
++      </ProfileSection>
++
++      <ProfileSection
++        eyebrow="Constraints"
++        title="Non-negotiables"
++        helper="Soft and hard constraints together. The honest list — what you'd refuse even if everything else aligned."
++      >
++        <AutosaveList
++          values={profile.nonNegotiables}
++          onSave={(v) => update({ nonNegotiables: v })}
++          placeholder="e.g. I need a secure enough base — stable employment or a clearly sustainable setup."
++        />
++      </ProfileSection>
++    </Page>
++  );
++}
+--- a/src/pages/Directions.tsx
++++ b/src/pages/Directions.tsx
+@@ -0,0 +1,382 @@
++import { useState } from "react";
++import {
++  AutosaveInput,
++  AutosaveScore,
++  AutosaveTextarea,
++  Btn,
++  Card,
++  Eyebrow,
++  SectionHeader,
++  StatusPill,
++} from "../components/Primitives";
++import { Page } from "../components/Shell";
++import {
++  directionAverage,
++  directionScoreCompleteness,
++  rankDirections,
++} from "../lib/scoring";
++import { useDirections } from "../lib/store";
++import type { Direction, DirectionStatus } from "../types/entities";
++
++// ---------- Status helpers -----------------------------------------------
++
++const STATUS_OPTIONS: DirectionStatus[] = [
++  "active",
++  "explore",
++  "park",
++  "avoid",
++];
++
++function statusTone(s: DirectionStatus): "rust" | "slate" | "default" | "muted" {
++  switch (s) {
++    case "active":
++      return "rust";
++    case "explore":
++      return "slate";
++    case "park":
++      return "muted";
++    case "avoid":
++      return "muted";
++  }
++}
++
++// ---------- Score row ----------------------------------------------------
++
++const SCORE_DIMENSIONS: { key: keyof Direction; label: string; helper: string }[] = [
++  { key: "interestScore", label: "Interest", helper: "How much you genuinely want this" },
++  { key: "marketDemandScore", label: "Market demand", helper: "Whether the world is asking for it" },
++  { key: "strengthsFitScore", label: "Strengths fit", helper: "How well your strengths apply" },
++  { key: "learningPotentialScore", label: "Learning potential", helper: "How much you'd grow in 3 years" },
++  { key: "accessScore", label: "Access", helper: "How realistically you can enter today" },
++  { key: "credibilityScore", label: "Credibility", helper: "Whether your story holds up" },
++  { key: "compensationPotentialScore", label: "Comp potential", helper: "Realistic earning ceiling" },
++];
++
++function ScoreRow({
++  direction,
++  onUpdate,
++}: {
++  direction: Direction;
++  onUpdate: (patch: Partial<Direction>) => void;
++}) {
++  return (
++    <div style={{ display: "grid", gap: 10 }}>
++      {SCORE_DIMENSIONS.map((d) => (
++        <div
++          key={d.key}
++          style={{
++            display: "grid",
++            gridTemplateColumns: "200px 1fr",
++            gap: 16,
++            alignItems: "center",
++          }}
++        >
++          <div>
++            <div
++              style={{
++                fontFamily: "var(--gh-mono)",
++                fontSize: 11,
++                color: "var(--gh-ink)",
++                textTransform: "uppercase",
++                letterSpacing: "0.06em",
++              }}
++            >
++              {d.label}
++            </div>
++            <div
++              style={{
++                fontSize: 11,
++                color: "var(--gh-faint)",
++                marginTop: 2,
++              }}
++            >
++              {d.helper}
++            </div>
++          </div>
++          <AutosaveScore
++            value={direction[d.key] as number | undefined}
++            onSave={(v) => onUpdate({ [d.key]: v } as Partial<Direction>)}
++            ariaLabel={d.label}
++          />
++        </div>
++      ))}
++    </div>
++  );
++}
++
++// ---------- Direction card -----------------------------------------------
++
++function DirectionCard({ direction }: { direction: Direction }) {
++  const { update, remove } = useDirections();
++  const [expanded, setExpanded] = useState(false);
++  const avg = directionAverage(direction);
++  const completeness = directionScoreCompleteness(direction);
++
++  const onUpdate = (patch: Partial<Direction>) => update(direction.id, patch);
++
++  return (
++    <Card style={{ padding: 24, marginBottom: 12 }}>
++      {/* Header row */}
++      <div
++        style={{
++          display: "grid",
++          gridTemplateColumns: "1fr auto auto auto",
++          gap: 16,
++          alignItems: "center",
++        }}
++      >
++        <div style={{ minWidth: 0 }}>
++          <AutosaveInput
++            value={direction.name}
++            onSave={(v) => onUpdate({ name: v })}
++            ariaLabel="Direction name"
++            style={{
++              fontSize: 17,
++              fontWeight: 600,
++              border: "1px solid transparent",
++              padding: "6px 8px",
++              background: "transparent",
++            }}
++          />
++        </div>
++
++        <StatusPill
++          value={direction.status}
++          options={STATUS_OPTIONS}
++          onChange={(v) => onUpdate({ status: v })}
++          toneFor={statusTone}
++        />
++
++        <div
++          style={{
++            display: "flex",
++            flexDirection: "column",
++            alignItems: "flex-end",
++            minWidth: 80,
++          }}
++        >
++          <div
++            style={{
++              fontFamily: "var(--gh-sans)",
++              fontSize: 22,
++              fontWeight: 700,
++              color: avg !== undefined ? "var(--gh-ink)" : "var(--gh-faint)",
++              letterSpacing: "-0.02em",
++              lineHeight: 1,
++            }}
++          >
++            {avg !== undefined ? avg.toFixed(1) : "—"}
++          </div>
++          <div
++            style={{
++              fontFamily: "var(--gh-mono)",
++              fontSize: 10,
++              color: "var(--gh-faint)",
++              marginTop: 4,
++              textTransform: "uppercase",
++              letterSpacing: "0.06em",
++            }}
++          >
++            {completeness}/7 scored
++          </div>
++        </div>
++
++        <Btn sm variant="ghost" onClick={() => setExpanded(!expanded)}>
++          {expanded ? "Collapse" : "Expand"}
++        </Btn>
++      </div>
++
++      {/* Description always visible */}
++      <div style={{ marginTop: 10 }}>
++        <AutosaveTextarea
++          rows={2}
++          value={direction.description}
++          onSave={(v) => onUpdate({ description: v })}
++          placeholder="One-sentence description of this direction."
++          ariaLabel="Description"
++          style={{
++            fontSize: 14,
++            color: "var(--gh-muted)",
++            background: "transparent",
++            border: "1px solid transparent",
++          }}
++        />
++      </div>
++
++      {/* Expanded content */}
++      {expanded && (
++        <div
++          style={{
++            marginTop: 20,
++            paddingTop: 20,
++            borderTop: "1px solid var(--gh-line-soft)",
++            display: "grid",
++            gap: 24,
++          }}
++        >
++          <div>
++            <Eyebrow style={{ marginBottom: 8 }}>Hypothesis</Eyebrow>
++            <AutosaveTextarea
++              rows={2}
++              value={direction.hypothesis}
++              onSave={(v) => onUpdate({ hypothesis: v })}
++              placeholder="Why might this direction fit? Written as a testable claim."
++              ariaLabel="Hypothesis"
++            />
++          </div>
++
++          <div>
++            <Eyebrow style={{ marginBottom: 12 }}>Scoring · 1–10</Eyebrow>
++            <ScoreRow direction={direction} onUpdate={onUpdate} />
++          </div>
++
++          <div>
++            <Eyebrow style={{ marginBottom: 8 }}>Notes</Eyebrow>
++            <AutosaveTextarea
++              rows={3}
++              value={direction.notes}
++              onSave={(v) => onUpdate({ notes: v })}
++              placeholder="Anything you want to remember about this direction."
++              ariaLabel="Notes"
++            />
++          </div>
++
++          <div style={{ display: "flex", justifyContent: "flex-end" }}>
++            <Btn
++              sm
++              variant="ghost"
++              onClick={() => {
++                if (
++                  window.confirm(
++                    `Delete "${direction.name}"? This can't be undone.`
++                  )
++                ) {
++                  remove(direction.id);
++                }
++              }}
++            >
++              Delete direction
++            </Btn>
++          </div>
++        </div>
++      )}
++    </Card>
++  );
++}
++
++// ---------- Decision-verb legend -----------------------------------------
++
++function DecisionLegend() {
++  const verbs: { label: string; meaning: string }[] = [
++    { label: "Active", meaning: "Currently testing — looking for evidence." },
++    { label: "Explore", meaning: "Worth one informational conversation, then re-decide." },
++    { label: "Park", meaning: "Good but not now — revisit in 90 days." },
++    { label: "Avoid", meaning: "Seen enough; this isn't it." },
++  ];
++  return (
++    <div
++      style={{
++        background: "var(--gh-mist)",
++        border: "1px solid var(--gh-mist-line)",
++        borderRadius: "var(--gh-r-panel)",
++        padding: "16px 20px",
++        marginBottom: 24,
++        display: "grid",
++        gridTemplateColumns: "repeat(4, 1fr)",
++        gap: 16,
++      }}
++    >
++      {verbs.map((v) => (
++        <div key={v.label}>
++          <div
++            style={{
++              fontFamily: "var(--gh-mono)",
++              fontSize: 11,
++              color: "var(--gh-ink)",
++              textTransform: "uppercase",
++              letterSpacing: "0.06em",
++              fontWeight: 600,
++              marginBottom: 4,
++            }}
++          >
++            {v.label}
++          </div>
++          <div
++            style={{
++              fontSize: 12.5,
++              color: "var(--gh-muted)",
++              lineHeight: 1.5,
++            }}
++          >
++            {v.meaning}
++          </div>
++        </div>
++      ))}
++    </div>
++  );
++}
++
++// ---------- Page ---------------------------------------------------------
++
++export default function DirectionsPage() {
++  const { directions, add } = useDirections();
++  const ranked = rankDirections(directions);
++  const avoided = directions.filter((d) => d.status === "avoid");
++
++  const handleAdd = () => {
++    const name = window.prompt("Name of the new direction?");
++    if (!name?.trim()) return;
++    add({
++      name: name.trim(),
++      description: "",
++      hypothesis: "",
++      status: "explore",
++      interestScore: undefined,
++      marketDemandScore: undefined,
++      strengthsFitScore: undefined,
++      learningPotentialScore: undefined,
++      accessScore: undefined,
++      credibilityScore: undefined,
++      compensationPotentialScore: undefined,
++      notes: "",
++    });
++  };
++
++  return (
++    <Page
++      crumbs={["Career discovery", "Directions"]}
++      actions={
++        <Btn sm variant="primary" onClick={handleAdd}>
++          + Add direction
++        </Btn>
++      }
++    >
++      <SectionHeader
++        eyebrow="02 · Directions"
++        title="Compare possible career paths before committing to one."
++        subtitle="Don't bet on one thing. Run several hypotheses in parallel and let evidence move them. Score honestly — directions that score 9s on internal axes and 4s on external ones are real signal."
++      />
++
++      <DecisionLegend />
++
++      {ranked.length === 0 ? (
++        <Card style={{ padding: 32, textAlign: "center" }}>
++          <p style={{ color: "var(--gh-muted)" }}>
++            No directions tracked yet. Add one to start comparing.
++          </p>
++        </Card>
++      ) : (
++        ranked.map((d) => <DirectionCard key={d.id} direction={d} />)
++      )}
++
++      {avoided.length > 0 && (
++        <div style={{ marginTop: 32 }}>
++          <Eyebrow style={{ marginBottom: 12 }}>Avoided</Eyebrow>
++          {avoided.map((d) => (
++            <DirectionCard key={d.id} direction={d} />
++          ))}
++        </div>
++      )}
++    </Page>
++  );
++}
+--- a/src/types/entities.ts
++++ b/src/types/entities.ts
+@@ -0,0 +1,166 @@
++/* ==========================================================================
++   Growth Habitat — Entity Types
++   The data contract for the entire app. Every entity gets an id, timestamps,
++   and a stable schema version. The version field is what lets the storage
++   layer migrate old data on load.
++   ========================================================================== */
++
++export const SCHEMA_VERSION = 1;
++
++// Score scale is 1–10 throughout. We use undefined (not 0) to mean "not yet
++// scored" so empty states render cleanly without lying about the data.
++export type Score = number | undefined;
++
++// ---------- Status & decision verbs ---------------------------------------
++
++export type DirectionStatus = "active" | "explore" | "park" | "avoid";
++export type Decision = "pursue" | "explore" | "park" | "avoid";
++export type EvidenceStrength = "weak" | "medium" | "strong";
++export type TrustSignal = "forming" | "not_enough_signal" | "concern";
++
++// ---------- Profile -------------------------------------------------------
++
++export interface Profile {
++  id: "profile";
++  name: string;
++  currentRole: string;
++  desiredDirection: string;
++  workingIdentity: string;
++  positioningStatement: string;
++  strengths: string[];
++  workingStyle: string;
++  energyGains: string[];
++  energyDrains: string[];
++  thriveEnvironments: string[];
++  avoidEnvironments: string[];
++  nonNegotiables: string[];
++  currentHypothesis: string;
++  updatedAt: string;
++}
++
++// ---------- Direction -----------------------------------------------------
++
++export interface Direction {
++  id: string;
++  name: string;
++  description: string;
++  hypothesis: string;
++  status: DirectionStatus;
++  interestScore: Score;
++  marketDemandScore: Score;
++  strengthsFitScore: Score;
++  learningPotentialScore: Score;
++  accessScore: Score;
++  credibilityScore: Score;
++  compensationPotentialScore: Score;
++  notes: string;
++  createdAt: string;
++  updatedAt: string;
++}
++
++// ---------- Conversation --------------------------------------------------
++
++export interface Conversation {
++  id: string;
++  person: string;
++  organization: string;
++  role: string;
++  relatedDirectionId?: string;
++  date: string;
++  energyBefore: Score;
++  energyAfter: Score;
++  admirationScore: Score;
++  learningPotentialScore: Score;
++  recognitionScore: Score;
++  autonomyScore: Score;
++  marketPullScore: Score;
++  trustSignal?: TrustSignal;
++  evidenceStrength: EvidenceStrength;
++  taggedEnergyGains: string[];   // references to Profile.energyGains entries
++  taggedEnergyDrains: string[];  // references to Profile.energyDrains entries
++  workWithOnHardProblem?: "yes" | "no" | "maybe";
++  keyInsight: string;
++  notes: string;
++  followUpAction: string;
++  createdAt: string;
++  updatedAt: string;
++}
++
++// ---------- Opportunity ---------------------------------------------------
++
++export interface Opportunity {
++  id: string;
++  company: string;
++  title: string;
++  link: string;
++  relatedDirectionId?: string;
++  status: "open" | "applied" | "interviewing" | "closed";
++  interestingProblemsScore: Score;
++  smartPeopleScore: Score;
++  learningPotentialScore: Score;
++  autonomyScore: Score;
++  visibleImpactScore: Score;
++  strengthsFitScore: Score;
++  compensationScore: Score;
++  futureValueScore: Score;
++  evidenceStrength: EvidenceStrength;
++  risks: string;
++  notes: string;
++  decision?: Decision;
++  positioningAngle: string;
++  outreachDraft: string;
++  cvAngle: string;
++  createdAt: string;
++  updatedAt: string;
++}
++
++// ---------- Hypothesis (current + history) --------------------------------
++
++export interface Hypothesis {
++  id: string;
++  statement: string;
++  confidence: Score;
++  evidenceFor: string;
++  evidenceAgainst: string;
++  nextStep: string;
++  isCurrent: boolean;
++  createdAt: string;
++  updatedAt: string;
++}
++
++// ---------- Reflection (free-form notes) ----------------------------------
++
++export interface Reflection {
++  id: string;
++  type: "observation" | "decision" | "question";
++  title: string;
++  content: string;
++  tags: string[];
++  createdAt: string;
++}
++
++// ---------- Pattern (auto-detected, not user-authored) --------------------
++
++export interface Pattern {
++  id: string;
++  kind: "concentration" | "absence" | "contradiction";
++  label: string;
++  description: string;
++  evidence: string[];
++  importance: number;
++  createdAt: string;
++}
++
++// ---------- Top-level store shape ----------------------------------------
++
++export interface AppData {
++  schemaVersion: number;
++  profile: Profile;
++  directions: Direction[];
++  conversations: Conversation[];
++  opportunities: Opportunity[];
++  hypotheses: Hypothesis[];   // ordered chronologically; .at(-1) is current
++  reflections: Reflection[];
++  patterns: Pattern[];
++  updatedAt: string;
++}
+--- a/tsconfig.json
++++ b/tsconfig.json
+@@ -1,8 +1,8 @@
+ {
+   "compilerOptions": {
+-    "target": "ES2020",
++    "target": "ES2022",
+     "useDefineForClassFields": true,
+-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
++    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+     "module": "ESNext",
+     "skipLibCheck": true,
+     "moduleResolution": "bundler",
