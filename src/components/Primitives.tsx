@@ -267,6 +267,7 @@ export function Tile({
   footer,
   italic = false,
   meta,
+  onClick,
 }: {
   tone: TileTone;
   eyebrow: string;
@@ -276,6 +277,7 @@ export function Tile({
   footer?: ReactNode;
   italic?: boolean;
   meta?: string;
+  onClick?: () => void;
 }) {
   const palette =
     tone === "rust"
@@ -290,9 +292,11 @@ export function Tile({
 
   return (
     <div
+      onClick={onClick}
       style={{
         background: palette.bg,
         color: palette.fg,
+        cursor: onClick ? "pointer" : "default",
         borderRadius: 16,
         border: dim ? "none" : `1px solid ${palette.line}`,
         boxShadow: dim ? "var(--gh-shadow-card)" : "var(--gh-shadow-hairline)",
@@ -716,5 +720,341 @@ export function StatusPill<T extends string>({
     >
       {value}
     </button>
+  );
+}
+
+// ==========================================================================
+// Chip multi-select (used for tagging energy gains/drains from Profile)
+// ==========================================================================
+
+export function ChipMultiSelect({
+  options,
+  selected,
+  onChange,
+  emptyLabel = "No options yet",
+  tone = "neutral",
+}: {
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  emptyLabel?: string;
+  tone?: "rust" | "slate" | "neutral";
+}) {
+  if (options.length === 0) {
+    return (
+      <div
+        style={{
+          fontSize: 13,
+          color: "var(--gh-faint)",
+          fontStyle: "italic",
+        }}
+      >
+        {emptyLabel}
+      </div>
+    );
+  }
+
+  const toggle = (opt: string) => {
+    onChange(
+      selected.includes(opt)
+        ? selected.filter((s) => s !== opt)
+        : [...selected, opt]
+    );
+  };
+
+  const palette =
+    tone === "rust"
+      ? {
+          on: { bg: "var(--gh-rust)", fg: "var(--gh-canvas)", border: "var(--gh-rust)" },
+          off: { bg: "var(--gh-surface)", fg: "var(--gh-muted)", border: "var(--gh-line)" },
+        }
+      : tone === "slate"
+      ? {
+          on: { bg: "var(--gh-slate)", fg: "var(--gh-canvas)", border: "var(--gh-slate)" },
+          off: { bg: "var(--gh-surface)", fg: "var(--gh-muted)", border: "var(--gh-line)" },
+        }
+      : {
+          on: { bg: "var(--gh-ink)", fg: "var(--gh-canvas)", border: "var(--gh-ink)" },
+          off: { bg: "var(--gh-surface)", fg: "var(--gh-muted)", border: "var(--gh-line)" },
+        };
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {options.map((opt) => {
+        const on = selected.includes(opt);
+        const p = on ? palette.on : palette.off;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 999,
+              border: `1px solid ${p.border}`,
+              background: p.bg,
+              color: p.fg,
+              fontFamily: "var(--gh-sans)",
+              fontSize: 12.5,
+              fontWeight: 500,
+              cursor: "pointer",
+              maxWidth: 380,
+              textAlign: "left",
+              lineHeight: 1.35,
+              transition: "all var(--gh-dur-base) var(--gh-ease)",
+            }}
+          >
+            {opt}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ==========================================================================
+// Segmented selector (3-state toggles like Trust signal, Evidence strength)
+// ==========================================================================
+
+export function SegmentedSelect<T extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  options: { value: T; label: string; helper?: string }[];
+  value: T | undefined;
+  onChange: (next: T) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${options.length}, 1fr)`,
+        gap: 4,
+        padding: 4,
+        background: "var(--gh-canvas-deep)",
+        border: "1px solid var(--gh-line)",
+        borderRadius: 10,
+      }}
+    >
+      {options.map((opt) => {
+        const on = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 6,
+              border: "none",
+              background: on ? "var(--gh-surface)" : "transparent",
+              color: on ? "var(--gh-ink)" : "var(--gh-muted)",
+              fontFamily: "var(--gh-sans)",
+              fontSize: 12.5,
+              fontWeight: on ? 600 : 500,
+              cursor: "pointer",
+              boxShadow: on ? "var(--gh-shadow-hairline)" : "none",
+              transition: "all var(--gh-dur-base) var(--gh-ease)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-start",
+              gap: 2,
+              textAlign: "left",
+            }}
+          >
+            <span>{opt.label}</span>
+            {opt.helper && (
+              <span
+                style={{
+                  fontSize: 10.5,
+                  color: on ? "var(--gh-muted)" : "var(--gh-faint)",
+                  fontWeight: 400,
+                }}
+              >
+                {opt.helper}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ==========================================================================
+// Checkbox row (used for Market pull signals)
+// ==========================================================================
+
+export function CheckboxRow({
+  label,
+  helper,
+  checked,
+  onChange,
+}: {
+  label: string;
+  helper?: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      style={{
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+        padding: "10px 12px",
+        background: checked ? "var(--gh-rust-soft)" : "var(--gh-surface)",
+        border: `1px solid ${checked ? "var(--gh-rust-line)" : "var(--gh-line)"}`,
+        borderRadius: 10,
+        cursor: "pointer",
+        textAlign: "left",
+        width: "100%",
+        transition: "all var(--gh-dur-base) var(--gh-ease)",
+      }}
+    >
+      <div
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: 4,
+          border: `1.5px solid ${checked ? "var(--gh-rust)" : "var(--gh-line)"}`,
+          background: checked ? "var(--gh-rust)" : "transparent",
+          flexShrink: 0,
+          marginTop: 1,
+          display: "grid",
+          placeItems: "center",
+          color: "var(--gh-canvas)",
+          fontSize: 11,
+        }}
+      >
+        {checked && "✓"}
+      </div>
+      <div>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: checked ? "var(--gh-rust-deep)" : "var(--gh-ink)",
+            lineHeight: 1.4,
+          }}
+        >
+          {label}
+        </div>
+        {helper && (
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: 11.5,
+              color: "var(--gh-muted)",
+              lineHeight: 1.4,
+            }}
+          >
+            {helper}
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ==========================================================================
+// Step indicator (used for the multi-step Conversation form)
+// ==========================================================================
+
+export function StepIndicator({
+  steps,
+  current,
+  onJump,
+}: {
+  steps: { label: string; sub?: string }[];
+  current: number;
+  onJump?: (index: number) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${steps.length}, 1fr)`,
+        gap: 0,
+        marginBottom: 32,
+        position: "relative",
+      }}
+    >
+      {steps.map((s, i) => {
+        const done = i < current;
+        const active = i === current;
+        const clickable = !!onJump;
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={clickable ? () => onJump!(i) : undefined}
+            disabled={!clickable}
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: "12px 8px",
+              cursor: clickable ? "pointer" : "default",
+              textAlign: "left",
+              borderTop: `2px solid ${
+                active
+                  ? "var(--gh-rust)"
+                  : done
+                  ? "var(--gh-rust-line)"
+                  : "var(--gh-line)"
+              }`,
+              transition: "border-color var(--gh-dur-base) var(--gh-ease)",
+            }}
+          >
+            <div
+              style={{
+                fontFamily: "var(--gh-mono)",
+                fontSize: 10.5,
+                color: active
+                  ? "var(--gh-rust)"
+                  : done
+                  ? "var(--gh-muted)"
+                  : "var(--gh-faint)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 600,
+                marginBottom: 6,
+              }}
+            >
+              {`Step ${i + 1}${done ? " ✓" : ""}`}
+            </div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: active ? 700 : 500,
+                color: active ? "var(--gh-ink)" : "var(--gh-muted)",
+                letterSpacing: "-0.01em",
+              }}
+            >
+              {s.label}
+            </div>
+            {s.sub && (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 12,
+                  color: "var(--gh-faint)",
+                  lineHeight: 1.4,
+                }}
+              >
+                {s.sub}
+              </div>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }

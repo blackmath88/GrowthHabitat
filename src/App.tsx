@@ -4,6 +4,8 @@ import { AppShell } from "./components/Shell";
 import CommandCenter from "./pages/CommandCenter";
 import DirectionsPage from "./pages/Directions";
 import ProfilePage from "./pages/Profile";
+import ConversationsPage from "./pages/Conversations";
+import ConversationPage from "./pages/Conversation";
 import { StubPage } from "./pages/StubPage";
 import { StoreProvider, useConversations, useProfile } from "./lib/store";
 
@@ -44,16 +46,8 @@ export default function App() {
           <Route path="/" element={<CommandCenter />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/directions" element={<DirectionsPage />} />
-          <Route
-            path="/conversations"
-            element={
-              <StubPage
-                num="03"
-                title="Talks"
-                subtitle="Use real conversations to test where your value is recognized."
-              />
-            }
-          />
+          <Route path="/conversations" element={<ConversationsPage />} />
+          <Route path="/conversations/:id" element={<ConversationPage />} />
           <Route
             path="/opportunities"
             element={

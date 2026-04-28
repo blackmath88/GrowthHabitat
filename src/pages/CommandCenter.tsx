@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import {
   Btn,
   Card,
@@ -79,11 +80,38 @@ function topScoreLabel(direction: NonNullable<ReturnType<typeof strongestDirecti
 }
 
 export default function CommandCenter() {
+  const navigate = useNavigate();
   const { profile } = useProfile();
   const { directions } = useDirections();
-  const { conversations } = useConversations();
+  const { conversations, add: addConversation } = useConversations();
   const { opportunities } = useOpportunities();
   const { current: hypothesis } = useCurrentHypothesis();
+
+  const handleAddConversation = () => {
+    const created = addConversation({
+      person: "",
+      organization: "",
+      role: "",
+      relatedDirectionId: undefined,
+      date: new Date().toISOString().slice(0, 10),
+      energyBefore: undefined,
+      energyAfter: undefined,
+      admirationScore: undefined,
+      learningPotentialScore: undefined,
+      recognitionScore: undefined,
+      autonomyScore: undefined,
+      marketPullScore: undefined,
+      trustSignal: undefined,
+      evidenceStrength: "medium",
+      taggedEnergyGains: [],
+      taggedEnergyDrains: [],
+      workWithOnHardProblem: undefined,
+      keyInsight: "",
+      notes: "",
+      followUpAction: "",
+    });
+    navigate(`/conversations/${created.id}`);
+  };
 
   const stats = commandStats(directions, conversations);
   const strongest = strongestDirection(directions);
@@ -128,7 +156,7 @@ export default function CommandCenter() {
       crumbs={["Career discovery", "Home"]}
       actions={
         <>
-          <Btn sm>Add talk</Btn>
+          <Btn sm onClick={handleAddConversation}>Add talk</Btn>
           <Btn sm>Add role</Btn>
           <Btn sm variant="dark">
             Export brief
@@ -271,6 +299,7 @@ export default function CommandCenter() {
           {strongest ? (
             <Tile
               tone="rust"
+              onClick={() => navigate("/directions")}
               eyebrow="Strongest direction · pursue"
               badge={
                 strongestAvg !== undefined && (
@@ -309,6 +338,7 @@ export default function CommandCenter() {
           {bestConversation ? (
             <Tile
               tone="slate"
+              onClick={() => navigate(`/conversations/${bestConversation.id}`)}
               eyebrow="Best conversation · reflect"
               badge={
                 typeof bestGain === "number" && (
@@ -345,6 +375,7 @@ export default function CommandCenter() {
           ) : (
             <Tile
               tone="mist"
+              onClick={handleAddConversation}
               eyebrow="Best conversation · empty"
               title="No conversations logged yet"
               body="Conversations are experiments. Log them within 24 hours so memory does not edit the data."
