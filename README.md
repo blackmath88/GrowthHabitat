@@ -1,4 +1,14 @@
+<!-- BEGIN public-repo-header -->
+<div align="center">
+
 # Growth Habitat
+
+<a href="https://github.com/blackmath88/GrowthHabitat"><img alt="Primary language: TypeScript" src="https://img.shields.io/badge/language-TypeScript-526078?style=flat"></a>
+<a href="https://github.com/blackmath88/GrowthHabitat#readme"><img alt="README" src="https://img.shields.io/badge/docs-readme-16796f?style=flat"></a>
+<a href="https://github.com/blackmath88/GrowthHabitat/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/blackmath88/GrowthHabitat?style=flat&amp;color=737373"></a>
+
+</div>
+<!-- END public-repo-header -->
 
 A career discovery app. Find where your abilities compound fastest.
 
